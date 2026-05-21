@@ -1,0 +1,166 @@
+"""
+Tsunami ray-path integrator — spherical geometry.
+
+Fans rays from a single point source across a range of azimuths, integrating
+each path through the bathymetry-derived slowness field using the spherical
+ray-tracing equations (see rt_rungekutta_sp).
+
+Implements the ray-tracing approach from:
+  Gusman, A. R., Satake, K., Shinohara, M., Sakai, S. I., & Tanioka, Y. (2017).
+  Fault slip distribution of the 2016 Fukushima earthquake estimated from
+  tsunami waveforms. Pure and Applied Geophysics, 174(8), 2925-2943.
+
+Originally implemented in MATLAB; this is the Python port.
+"""
+import numpy as np
+from rt_rungekutta_sp import rt_rungekutta_sp
+
+
+def raytracing_sp(lon_arr, lat_arr, depth, dt, max_time,
+                  source_lon, source_lat, azimuths_deg):
+    """
+    Trace tsunami rays through a bathymetry grid.
+
+    Fans out one ray per entry in azimuths_deg, integrates each path with the
+    4th-order Runge-Kutta spherical ray-tracing equations, and returns the
+    lon/lat history of every ray as 2-D arrays.
+
+    Parameters
+    ----------
+    lon_arr : array_like, shape (n_lon,)
+        Longitude coordinates of the grid columns in degrees, uniformly spaced.
+    lat_arr : array_like, shape (n_lat,)
+        Latitude coordinates of the grid rows in degrees, uniformly spaced.
+    depth : ndarray, shape (n_lon, n_lat)
+        Bathymetry in metres.  Positive = ocean, negative or zero = land.
+        First axis is longitude (lon_arr), second is latitude (lat_arr).
+        For matplotlib contour plots use ``plt.contour(lon_arr, lat_arr, depth.T)``
+        to transpose to the [lat, lon] row-major layout contour expects.
+        Cells with depth < 0 are zeroed internally before computing slowness;
+        the caller's array is not modified.
+    dt : float
+        Integration time step in seconds.
+    max_time : float
+        Maximum integration time in seconds.
+    source_lon : float
+        Source longitude in degrees.
+    source_lat : float
+        Source latitude in degrees.
+    azimuths_deg : array_like, shape (n_rays,)
+        Initial ray azimuths in degrees: 0 = north, 90 = east, 180 = south,
+        270 = west (clockwise from north).
+
+    Returns
+    -------
+    ray_lon_deg : ndarray, shape (n_rays, n_steps)
+        Longitude of each ray at each recorded state, in degrees.
+        Column k corresponds to time k * dt seconds after the source.
+        Positions after a ray terminates are NaN.
+    ray_lat_deg : ndarray, shape (n_rays, n_steps)
+        Latitude of each ray at each recorded state, in degrees.
+        NaN after termination.
+    ray_dir_deg : ndarray, shape (n_rays, n_steps)
+        Ray direction (ODE internal angle) in degrees.  NaN after termination.
+        Column 0 holds the initial ODE angle: ``(180 - azimuth_deg) % 360``.
+
+    Notes
+    -----
+    Grid spacing
+        Longitude and latitude must have the same uniform spacing.
+        dcolat_rad = dphi_rad = |lat_arr[1] - lat_arr[0]| * pi/180.
+
+    Slowness
+        Tsunami wave speed c = sqrt(g * depth); slowness n = 1/c with g = 9.8 m/s².
+        Land/dry cells (depth <= 0) are assigned n = 1, which triggers the
+        n_here >= 1 early-exit condition in rt_rungekutta_sp.
+
+    Output column count
+        n_steps = len(time_arr) + 1.  The integrator produces one state per
+        completed step plus the initial condition, so column 0 = t=0 and
+        column k = state after k steps (t = k*dt).
+
+    NaN pre-fill
+        Output arrays are pre-filled with NaN; positions beyond a ray's
+        termination point are left as NaN rather than zero, so no valid
+        position at lon=0° or lat=90° can be incorrectly masked.
+    """
+    DEG_TO_RAD = np.pi / 180.0
+    G          = 9.8              # gravitational acceleration, m/s²
+
+    lon_arr      = np.asarray(lon_arr,      dtype=float)
+    lat_arr      = np.asarray(lat_arr,      dtype=float)
+    depth        = np.asarray(depth,        dtype=float)
+    azimuths_deg = np.asarray(azimuths_deg, dtype=float)
+
+    # ── sanity check ─────────────────────────────────────────────────────────
+    expected_shape = (len(lon_arr), len(lat_arr))
+    if depth.shape != expected_shape:
+        raise ValueError(
+            f"depth shape {depth.shape} does not match "
+            f"(len(lon_arr), len(lat_arr)) = {expected_shape}. "
+            "First axis must be longitude, second must be latitude."
+        )
+
+    # ── colatitude array and grid spacing ────────────────────────────────────
+    # The ODE is expressed in colatitude (theta = 90° - latitude).
+    # Grid spacing is taken as the absolute cell size to handle either
+    # ascending or descending lat_arr.
+    colat_arr        = 90.0 - lat_arr
+    grid_spacing_deg = abs(colat_arr[1] - colat_arr[0])
+    dcolat_rad       = grid_spacing_deg * DEG_TO_RAD
+    dphi_rad         = dcolat_rad          # equal spacing in lon and lat assumed
+
+    n_lon, n_lat = depth.shape
+
+    # ── source grid indices (0-based) ─────────────────────────────────────────
+    source_ix = int(np.argmin(np.abs(lon_arr - source_lon)))
+    source_iy = int(np.argmin(np.abs(lat_arr - source_lat)))
+
+    # ── slowness field ────────────────────────────────────────────────────────
+    # Tsunami wave speed c = sqrt(g * depth); slowness n = 1/c.
+    # Land cells (depth <= 0) get sentinel value n = 1 to trigger the boundary
+    # check in rt_rungekutta_sp without causing a divide-by-zero.
+    local_depth = np.where(depth < 0.0, 0.0, depth)
+    # Replace zero-depth cells in the denominator with 1 before dividing to
+    # avoid a runtime warning; the np.where mask discards those values anyway.
+    safe_depth = np.where(local_depth > 0.0, local_depth, 1.0)
+    slowness   = np.where(
+        local_depth > 0.0,
+        1.0 / np.sqrt(G * safe_depth),
+        1.0,                             # land sentinel
+    )
+
+    # ── slowness gradients ────────────────────────────────────────────────────
+    # First-order finite differences along each axis; the gradient arrays are
+    # one cell shorter than the slowness field on the differenced axis.
+    slowness_grad_phi   = np.diff(slowness, axis=0) / dphi_rad    # (n_lon-1, n_lat)
+    slowness_grad_colat = np.diff(slowness, axis=1) / dcolat_rad  # (n_lon, n_lat-1)
+
+    # ── time array ────────────────────────────────────────────────────────────
+    time_arr = np.arange(0.0, max_time + dt, dt)
+
+    # One state per completed step plus the initial condition
+    n_steps = len(time_arr) + 1
+    n_rays  = len(azimuths_deg)
+
+    # ── output arrays (NaN pre-filled) ───────────────────────────────────────
+    ray_lon_deg = np.full((n_rays, n_steps), np.nan)
+    ray_lat_deg = np.full((n_rays, n_steps), np.nan)
+    ray_dir_deg = np.full((n_rays, n_steps), np.nan)
+
+    # ── ray integration loop ──────────────────────────────────────────────────
+    for ray_idx, azimuth in enumerate(azimuths_deg):
+        phi, theta, ray_dir, _ix_hist, _iy_hist = rt_rungekutta_sp(
+            time_arr, dt, dphi_rad, dcolat_rad,
+            slowness, slowness_grad_phi, slowness_grad_colat,
+            azimuth, source_lon, source_lat,
+            source_ix, source_iy, n_lon, n_lat, local_depth,
+        )
+
+        n_pts = len(phi)   # <= n_steps; fewer if the ray terminated early
+
+        ray_lon_deg[ray_idx, :n_pts] = phi    / DEG_TO_RAD
+        ray_lat_deg[ray_idx, :n_pts] = 90.0 - theta   / DEG_TO_RAD
+        ray_dir_deg[ray_idx, :n_pts] = ray_dir / DEG_TO_RAD
+
+    return ray_lon_deg, ray_lat_deg, ray_dir_deg
