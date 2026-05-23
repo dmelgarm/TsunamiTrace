@@ -155,16 +155,70 @@ def test_azimuthal_symmetry(ridge):
 
     # Longitude deviations from the source are mirror-symmetric:
     # ray at 30° drifts east by δ; ray at 330° drifts west by the same δ.
-    # Tolerance is 1e-5° (~1 m) to allow for floating-point asymmetry in the
-    # RK4 grid-cell index lookup accumulating over the integration.
+    # Tolerance is 1e-4° (~11 m): the ridge fixture has different lon and lat
+    # spacings (35°/149 ≈ 0.235° vs 30°/99 ≈ 0.303°), so dphi_rad ≠ dcolat_rad
+    # and grid-cell snapping accumulates a small asymmetry (~5e-5° over 3600 s)
+    # between the two mirror rays.  Any real directional error would be orders
+    # of magnitude larger than this.
     src_lon = r['source_lon']
     np.testing.assert_allclose(
-        ray_lon[0] - src_lon, -(ray_lon[1] - src_lon), atol=1e-5,
+        ray_lon[0] - src_lon, -(ray_lon[1] - src_lon), atol=1e-4,
         err_msg="Longitude deviations are not mirror-symmetric about the source longitude",
     )
     # Both rays head equally northward, so latitude traces must be identical.
-    np.testing.assert_allclose(ray_lat[0], ray_lat[1], atol=1e-5,
+    np.testing.assert_allclose(ray_lat[0], ray_lat[1], atol=1e-4,
                                err_msg="Latitude traces are not equal for meridional mirror rays")
+
+
+@pytest.fixture(scope="module")
+def lat_gradient_ocean():
+    """
+    80 × 80 grid in which depth increases northward: 1000 m at the southern
+    edge, 5000 m at the northern edge, varying linearly with latitude.
+    Wave speed therefore increases from south to north, so Snell's law bends
+    a westward ray toward the south (the slower, shallower side).
+    """
+    N_LON, N_LAT = 80, 80
+    lon_arr = np.linspace(-20.0, 20.0, N_LON)
+    lat_arr = np.linspace(-20.0, 20.0, N_LAT)
+    LON, LAT = np.meshgrid(lon_arr, lat_arr)   # each shape (N_LAT, N_LON)
+    # depth ranges from 1000 m (lat = -20°) to 5000 m (lat = +20°)
+    depth_2d = 1_000.0 + 4_000.0 * (LAT + 20.0) / 40.0
+    return dict(
+        lon_arr    = lon_arr,
+        lat_arr    = lat_arr,
+        depth      = depth_2d.T,   # (n_lon, n_lat) as trace_rays expects
+        source_lon = 0.0,
+        source_lat = 0.0,
+    )
+
+
+def test_snell_law_lat_gradient(lat_gradient_ocean):
+    """
+    On a north-deepening ocean a due-west ray must refract southward.
+
+    Slowness n = 1/c decreases northward (deeper → faster → smaller n).
+    The southward gradient dn/d(colat) is positive, so the third term in
+    the direction ODE pushes the ray toward south.  A positive final latitude
+    means the gradient sign is inverted — which is exactly what the abs() bug
+    produced by reversing the effective colatitude step direction.
+    """
+    g = lat_gradient_ocean
+    ray_lon, ray_lat, _ = tt.trace_rays(
+        g['lon_arr'], g['lat_arr'], g['depth'],
+        dt=60.0, max_time=3_600.0,
+        source_lon=g['source_lon'], source_lat=g['source_lat'],
+        azimuths_deg=np.array([270.0]),
+    )
+    # Ray may hit the western boundary before max_time — strip trailing NaNs
+    valid = ~np.isnan(ray_lat[0])
+    assert valid.any(), "Due-west ray terminated immediately — check grid setup"
+    final_lat = ray_lat[0, valid][-1]
+    assert final_lat < 0, (
+        f"Due-west ray on north-deepening ocean should refract southward "
+        f"(Snell's law: toward slower/shallower water in the south); "
+        f"got final_lat = {final_lat:.4f}°"
+    )
 
 
 def test_ridge_slows_westward_ray(ridge):

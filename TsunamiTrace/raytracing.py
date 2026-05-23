@@ -99,12 +99,14 @@ def trace_rays(lon_arr, lat_arr, depth, dt, max_time,
 
     # ── colatitude array and grid spacing ────────────────────────────────────
     # The ODE is expressed in colatitude (theta = 90° - latitude).
-    # Grid spacing is taken as the absolute cell size to handle either
-    # ascending or descending lat_arr.
-    colat_arr        = 90.0 - lat_arr
-    grid_spacing_deg = abs(colat_arr[1] - colat_arr[0])
-    dcolat_rad       = grid_spacing_deg * DEG_TO_RAD
-    dphi_rad         = dcolat_rad          # equal spacing in lon and lat assumed
+    # dcolat_rad must be SIGNED: when lat_arr is ascending, colatitude decreases
+    # as the array index increases, so dcolat_rad is negative.  The sign is used
+    # inside _integrate_rays when snapping the ray state to a grid cell index and
+    # when evaluating slowness gradients — stripping the sign reverses the
+    # effective latitude direction and produces mirrored/out-of-bounds rays.
+    colat_arr  = 90.0 - lat_arr
+    dcolat_rad = (colat_arr[1] - colat_arr[0]) * DEG_TO_RAD   # signed
+    dphi_rad   = abs(lon_arr[1] - lon_arr[0])  * DEG_TO_RAD   # always positive
 
     n_lon, n_lat = depth.shape
 
