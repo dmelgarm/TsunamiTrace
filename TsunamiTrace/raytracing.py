@@ -1,29 +1,25 @@
 """
-Tsunami ray-path integrator — spherical geometry.
-
-Fans rays from a single point source across a range of azimuths, integrating
-each path through the bathymetry-derived slowness field using the spherical
-ray-tracing equations (see rt_rungekutta_sp).
+Tsunami ray-path integrator — fans rays from a point source.
 
 Implements the ray-tracing approach from:
-  Gusman, A. R., Satake, K., Shinohara, M., Sakai, S. I., & Tanioka, Y. (2017).
+  Gusman, A. R., Satake, K., Shinohora, M., Sakai, S. I., & Tanioka, Y. (2017).
   Fault slip distribution of the 2016 Fukushima earthquake estimated from
   tsunami waveforms. Pure and Applied Geophysics, 174(8), 2925-2943.
 
 Originally implemented in MATLAB; this is the Python port.
 """
 import numpy as np
-from rt_rungekutta_sp import rt_rungekutta_sp
+from ._rungekutta import _integrate_ray
 
 
-def raytracing_sp(lon_arr, lat_arr, depth, dt, max_time,
-                  source_lon, source_lat, azimuths_deg):
+def trace_rays(lon_arr, lat_arr, depth, dt, max_time,
+               source_lon, source_lat, azimuths_deg):
     """
     Trace tsunami rays through a bathymetry grid.
 
     Fans out one ray per entry in azimuths_deg, integrates each path with the
-    4th-order Runge-Kutta spherical ray-tracing equations, and returns the
-    lon/lat history of every ray as 2-D arrays.
+    4th-order Runge-Kutta ray-tracing equations, and returns the lon/lat
+    history of every ray as 2-D arrays.
 
     Parameters
     ----------
@@ -72,7 +68,7 @@ def raytracing_sp(lon_arr, lat_arr, depth, dt, max_time,
     Slowness
         Tsunami wave speed c = sqrt(g * depth); slowness n = 1/c with g = 9.8 m/s².
         Land/dry cells (depth <= 0) are assigned n = 1, which triggers the
-        n_here >= 1 early-exit condition in rt_rungekutta_sp.
+        n_here >= 1 early-exit condition in _integrate_ray.
 
     Output column count
         n_steps = len(time_arr) + 1.  The integrator produces one state per
@@ -119,7 +115,7 @@ def raytracing_sp(lon_arr, lat_arr, depth, dt, max_time,
     # ── slowness field ────────────────────────────────────────────────────────
     # Tsunami wave speed c = sqrt(g * depth); slowness n = 1/c.
     # Land cells (depth <= 0) get sentinel value n = 1 to trigger the boundary
-    # check in rt_rungekutta_sp without causing a divide-by-zero.
+    # check in _integrate_ray without causing a divide-by-zero.
     local_depth = np.where(depth < 0.0, 0.0, depth)
     # Replace zero-depth cells in the denominator with 1 before dividing to
     # avoid a runtime warning; the np.where mask discards those values anyway.
@@ -150,7 +146,7 @@ def raytracing_sp(lon_arr, lat_arr, depth, dt, max_time,
 
     # ── ray integration loop ──────────────────────────────────────────────────
     for ray_idx, azimuth in enumerate(azimuths_deg):
-        phi, theta, ray_dir, _ix_hist, _iy_hist = rt_rungekutta_sp(
+        phi, theta, ray_dir, _ix_hist, _iy_hist = _integrate_ray(
             time_arr, dt, dphi_rad, dcolat_rad,
             slowness, slowness_grad_phi, slowness_grad_colat,
             azimuth, source_lon, source_lat,

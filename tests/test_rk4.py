@@ -1,5 +1,5 @@
 """
-Validate rt_rungekutta_sp on a flat (constant-depth) ocean.
+Validate the RK4 integrator on a flat (constant-depth) ocean.
 
 On a uniform-depth ocean the slowness gradients are zero everywhere, so each
 ray must follow a great-circle path at a constant speed of sqrt(g*d).  Two
@@ -13,7 +13,7 @@ analytically exact cases anchor the numerical checks:
       →  latitude is constant for the entire integration.
 
 Azimuths follow the standard geographic convention: 0=N, 90=E, 180=S, 270=W
-(clockwise from north), matching the interface of rt_rungekutta_sp.
+(clockwise from north).
 
 For all azimuths the integrated path is compared against the analytical
 great-circle position computed from spherical trigonometry.
@@ -25,7 +25,7 @@ Tests the implementation of the ray-tracing approach from:
 """
 import numpy as np
 import matplotlib.pyplot as plt
-from rt_rungekutta_sp import rt_rungekutta_sp
+from TsunamiTrace._rungekutta import _integrate_ray
 
 # ── physical and numerical constants ─────────────────────────────────────────
 DEG_TO_RAD   = np.pi / 180.0
@@ -49,7 +49,6 @@ depth_grid    = np.full((n_lon, n_lat), DEPTH)
 slowness_grid = np.full((n_lon, n_lat), SLOWNESS)
 
 # Flat ocean → all slowness gradients are exactly zero.
-# Shapes mirror raytracing_sp.py: (n_lon-1, n_lat) and (n_lon, n_lat-1).
 slowness_grad_phi   = np.zeros((n_lon - 1, n_lat))
 slowness_grad_colat = np.zeros((n_lon, n_lat - 1))
 
@@ -125,7 +124,7 @@ print("─" * 58)
 all_max_devs = []
 
 for azimuth in azimuths:
-    phi_ray, theta_ray, ray_dir, ix_hist, iy_hist = rt_rungekutta_sp(
+    phi_ray, theta_ray, ray_dir, ix_hist, iy_hist = _integrate_ray(
         time_arr, DT, dphi_rad, dcolat_rad,
         slowness_grid, slowness_grad_phi, slowness_grad_colat,
         azimuth, SOURCE_LON, SOURCE_LAT,
@@ -173,7 +172,7 @@ for azimuth in azimuths:
 print()
 
 # azimuth = 0°: northward ray — longitude must be exactly constant
-phi_n, theta_n, *_ = rt_rungekutta_sp(
+phi_n, theta_n, *_ = _integrate_ray(
     time_arr, DT, dphi_rad, dcolat_rad,
     slowness_grid, slowness_grad_phi, slowness_grad_colat,
     0.0, SOURCE_LON, SOURCE_LAT,
@@ -184,7 +183,7 @@ print(f"Due-north ray (az=0°)   max lon drift : {lon_drift_north:.2e}°  "
       f"(expected: 0)")
 
 # azimuth = 90°: eastward ray at the equator — latitude must be exactly constant
-_, theta_e, *_ = rt_rungekutta_sp(
+_, theta_e, *_ = _integrate_ray(
     time_arr, DT, dphi_rad, dcolat_rad,
     slowness_grid, slowness_grad_phi, slowness_grad_colat,
     90.0, SOURCE_LON, SOURCE_LAT,
@@ -202,7 +201,7 @@ print(f"Max deviation from straight line across all azimuths: "
 ax_path.plot(SOURCE_LON, SOURCE_LAT, 'k*', ms=10, zorder=5, label='source')
 ax_path.set_xlabel('Longitude (°)')
 ax_path.set_ylabel('Latitude (°)')
-ax_path.set_title('Ray paths (solid) vs great circles (dashed grey)')
+ax_path.set_title('Ray paths (solid) vs great circles (dashed)')
 ax_path.legend(title='Azimuth', fontsize=8)
 ax_path.set_aspect('equal')
 ax_path.grid(True, alpha=0.3)

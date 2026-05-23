@@ -3,3 +3,6 @@ __pycache__/
 *.png
 *.fig
 *.mat
+*.egg-info/
+dist/
+build/

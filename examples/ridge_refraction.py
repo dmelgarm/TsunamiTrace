@@ -1,23 +1,23 @@
 """
-ray_tracing_test.py — synthetic ridge bathymetry test for TsunamiTrace.
+ridge_refraction.py — synthetic ridge bathymetry example for TsunamiTrace.
 
-Tests ray refraction across a N-S submarine ridge sitting between the source
-and the far side of the domain.  In deep water the wave speed is
+Demonstrates ray refraction across a N-S submarine ridge sitting between the
+source and the far side of the domain.  In deep water the wave speed is
 c = sqrt(g * depth) ~ 220 m/s; over the ridge crest it drops to ~ 70 m/s.
 Rays aimed at the ridge slow, compress, and deflect; rays that miss the ends
 of the ridge travel almost unimpeded.
 
 Run:
-    python ray_tracing_test.py
+    python examples/ridge_refraction.py
 
 Output:
-    ray_tracing_test.png
+    ridge_refraction.png
 """
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
-from raytracing import raytracing_sp
+import TsunamiTrace as tt
 
 # ── grid ──────────────────────────────────────────────────────────────────────
 N_LON, N_LAT = 350, 400
@@ -43,7 +43,7 @@ ridge_rise = (DEEP_OCEAN - RIDGE_SILL) * np.exp(
 )
 Z = DEEP_OCEAN - ridge_rise     # (n_lat, n_lon) — plotting layout
 
-# raytracing_sp expects depth[lon_idx, lat_idx]: transpose from (n_lat, n_lon)
+# trace_rays expects depth[lon_idx, lat_idx]: transpose from (n_lat, n_lon)
 depth = Z.T                     # (n_lon, n_lat)
 
 # ── source ────────────────────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ SOURCE_LAT =   0.0
 # At deep-ocean speed (~221 m/s) the wavefront travels ~1,590 km in 2 hours,
 # enough to cross the ridge (source-to-ridge ≈ 1,110 km at the equator).
 DT           =  30       # s — time step
-MAX_TIME     = 14_400     # s — 2 hours
+MAX_TIME     = 14_400    # s — 4 hours
 AZIMUTHS_DEG = np.arange(0, 360, 2, dtype=float)   # every 2°, 180 rays
 
 # ── ray tracing ───────────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ print(f"Deep ocean  : {DEEP_OCEAN:.0f} m  "
       f"(wave speed {np.sqrt(9.8 * DEEP_OCEAN):.1f} m/s)")
 print(f"Tracing {len(AZIMUTHS_DEG)} rays (dt={DT} s, max {MAX_TIME//3600} h) …")
 
-ray_lon, ray_lat, _ = raytracing_sp(
+ray_lon, ray_lat, _ = tt.trace_rays(
     lon_arr, lat_arr, depth,
     DT, MAX_TIME,
     SOURCE_LON, SOURCE_LAT,
@@ -94,7 +94,7 @@ ax.clabel(cs, fmt='%d m', fontsize=7, inline=True)
 
 # Ray paths — colour by azimuth so individual rays are distinguishable
 cmap_rays = plt.cm.plasma
-for i, az in enumerate(AZIMUTHS_DEG):
+for i in range(len(AZIMUTHS_DEG)):
     c = cmap_rays(i / len(AZIMUTHS_DEG))
     ax.plot(ray_lon[i], ray_lat[i], color=c, linewidth=0.5, alpha=0.7)
 
@@ -104,7 +104,7 @@ ax.plot(SOURCE_LON, SOURCE_LAT,
         markerfacecolor='yellow', markeredgecolor='k', markeredgewidth=0.8,
         linestyle='none', zorder=6, label='source')
 
-# Ridge crest line (where depth is shallowest)
+# Ridge crest line
 ax.axvline(RIDGE_LON, color='w', linewidth=1.0, linestyle='--',
            alpha=0.6, label=f'ridge crest ({RIDGE_LON}°E)')
 
@@ -128,6 +128,6 @@ cbar.ax.yaxis.set_major_formatter(
 )
 
 plt.tight_layout()
-plt.savefig('ray_tracing_test.png', dpi=200, bbox_inches='tight')
+plt.savefig('ridge_refraction.png', dpi=200, bbox_inches='tight')
 plt.show()
-print("Saved: ray_tracing_test.png")
+print("Saved: ridge_refraction.png")

@@ -1,5 +1,5 @@
 """
-Single-ray RK4 integrator for spherical tsunami ray tracing.
+Single-ray RK4 integrator for tsunami ray tracing.
 
 Implements the ray-tracing approach from:
   Gusman, A. R., Satake, K., Shinohara, M., Sakai, S. I., & Tanioka, Y. (2017).
@@ -11,10 +11,10 @@ Originally implemented in MATLAB; this is the Python port.
 import numpy as np
 
 
-def rt_rungekutta_sp(time_arr, dt, dphi_rad, dcolat_rad,
-                     slowness, slowness_grad_phi, slowness_grad_colat,
-                     initial_azimuth_deg, source_lon, source_lat,
-                     source_ix, source_iy, n_lon, n_lat, depth):
+def _integrate_ray(time_arr, dt, dphi_rad, dcolat_rad,
+                   slowness, slowness_grad_phi, slowness_grad_colat,
+                   initial_azimuth_deg, source_lon, source_lat,
+                   source_ix, source_iy, n_lon, n_lat, depth):
     """
     Integrate a single tsunami ray on a sphere using 4th-order Runge-Kutta.
 
@@ -83,7 +83,7 @@ def rt_rungekutta_sp(time_arr, dt, dphi_rad, dcolat_rad,
 
     Notes
     -----
-    Equations of motion — spherical ray-tracing (Snell's law on a sphere):
+    Equations of motion — Snell's law on a sphere:
 
         dtheta/dt   = cos(ray_dir) / (n * R)
         dphi/dt     = sin(ray_dir) / (n * R * sin(theta))
