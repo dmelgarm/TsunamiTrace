@@ -56,7 +56,7 @@ SOURCE_LAT =   0.0
 # At deep-ocean speed (~221 m/s) the wavefront travels ~1,590 km in 2 hours,
 # enough to cross the ridge (source-to-ridge ≈ 1,110 km at the equator).
 DT           =  30       # s — time step
-MAX_TIME     = 7_200     # s — 2 hours
+MAX_TIME     = 14_400     # s — 2 hours
 AZIMUTHS_DEG = np.arange(0, 360, 2, dtype=float)   # every 2°, 180 rays
 
 # ── ray tracing ───────────────────────────────────────────────────────────────
