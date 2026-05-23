@@ -1,22 +1,14 @@
 """
-Validate the RK4 integrator on a flat (constant-depth) ocean.
+tests/test_rk4.py — pytest unit tests for the RK4 ray integrator.
 
 On a uniform-depth ocean the slowness gradients are zero everywhere, so each
-ray must follow a great-circle path at a constant speed of sqrt(g*d).  Two
-analytically exact cases anchor the numerical checks:
+ray must follow a great-circle path at constant speed sqrt(g*depth).  The
+tests below verify this analytically, covering:
 
-  azimuth = 0°  (due north)
-      dphi/dt = 0  →  longitude is constant for the entire integration.
-
-  azimuth = 90° (due east, source at equator)
-      The spherical correction term vanishes at theta = pi/2, so dtheta/dt = 0
-      →  latitude is constant for the entire integration.
-
-Azimuths follow the standard geographic convention: 0=N, 90=E, 180=S, 270=W
-(clockwise from north).
-
-For all azimuths the integrated path is compared against the analytical
-great-circle position computed from spherical trigonometry.
+  - Great-circle accuracy across multiple azimuths (max deviation < 1e-3°)
+  - Exact symmetry: due-north ray has zero longitude drift
+  - Exact symmetry: due-east equatorial ray has zero latitude drift
+  - Arc-length accuracy: integrated distance matches wave_speed * t within 1 m
 
 Tests the implementation of the ray-tracing approach from:
   Gusman, A. R., Satake, K., Shinohara, M., Sakai, S. I., & Tanioka, Y. (2017).
@@ -24,195 +16,153 @@ Tests the implementation of the ray-tracing approach from:
   tsunami waveforms. Pure and Applied Geophysics, 174(8), 2925-2943.
 """
 import numpy as np
-import matplotlib.pyplot as plt
+import pytest
 from TsunamiTrace._rungekutta import _integrate_ray
 
-# ── physical and numerical constants ─────────────────────────────────────────
+# ── physical constants ────────────────────────────────────────────────────────
 DEG_TO_RAD   = np.pi / 180.0
 EARTH_RADIUS = 6_371_000.0   # m
 G            = 9.8           # m/s²
-DEPTH        = 4_000.0       # m  (flat ocean)
+DEPTH        = 4_000.0       # m — flat ocean
+WAVE_SPEED   = np.sqrt(G * DEPTH)
+SLOWNESS     = 1.0 / WAVE_SPEED
 
-WAVE_SPEED = np.sqrt(G * DEPTH)        # ~197.99 m/s
-SLOWNESS   = 1.0 / WAVE_SPEED         # s/m
-
-# ── grid ─────────────────────────────────────────────────────────────────────
-# 20° × 20° plate-carrée grid centred on the equator/prime-meridian.
-# Spacing is uniform so dphi_rad == dcolat_rad.
+# ── integration parameters ────────────────────────────────────────────────────
 GRID_SPACING_DEG = 0.1
-lon_arr = np.arange(-10.0, 10.0 + GRID_SPACING_DEG, GRID_SPACING_DEG)
-lat_arr = np.arange(-10.0, 10.0 + GRID_SPACING_DEG, GRID_SPACING_DEG)
-n_lon = len(lon_arr)
-n_lat = len(lat_arr)
-
-depth_grid    = np.full((n_lon, n_lat), DEPTH)
-slowness_grid = np.full((n_lon, n_lat), SLOWNESS)
-
-# Flat ocean → all slowness gradients are exactly zero.
-slowness_grad_phi   = np.zeros((n_lon - 1, n_lat))
-slowness_grad_colat = np.zeros((n_lon, n_lat - 1))
-
-dphi_rad   = GRID_SPACING_DEG * DEG_TO_RAD
-dcolat_rad = GRID_SPACING_DEG * DEG_TO_RAD
-
-# ── time ─────────────────────────────────────────────────────────────────────
-DT       = 10.0          # s
-MAX_TIME = 3_600.0       # s  (1 hour — ray travels ~6.4° on Earth's surface)
-time_arr = np.arange(0.0, MAX_TIME + DT, DT)
-
-# ── source: dead centre of the grid ──────────────────────────────────────────
-SOURCE_LON = 0.0
-SOURCE_LAT = 0.0
-source_ix  = int(np.argmin(np.abs(lon_arr - SOURCE_LON)))
-source_iy  = int(np.argmin(np.abs(lat_arr - SOURCE_LAT)))
+DT               = 10.0     # s
+MAX_TIME         = 3_600.0  # s — 1 hour; ray travels ~6.4° on Earth's surface
+SOURCE_LON       = 0.0
+SOURCE_LAT       = 0.0
 
 
-# ── analytical great-circle path ─────────────────────────────────────────────
-def great_circle(source_lat_deg, source_lon_deg, azimuth_deg, t, wave_speed):
+# ── shared fixture ────────────────────────────────────────────────────────────
+@pytest.fixture(scope="module")
+def flat_ocean():
     """
-    Return (lat_deg, lon_deg) arrays for a great-circle ray launched from
-    (source_lat_deg, source_lon_deg) at azimuth_deg (measured from north in
-    the spherical convention of the ODE system).
-
-    Derivation uses the spherical law of cosines (side) for the colatitude
-    and the four-parts formula / law of sines for the longitude increment.
+    20° × 20° uniform-depth grid centred on the equator/prime-meridian.
+    All slowness gradients are exactly zero.
     """
-    theta_0 = (90.0 - source_lat_deg) * DEG_TO_RAD
-    phi_0   = source_lon_deg * DEG_TO_RAD
+    lon_arr = np.arange(-10.0, 10.0 + GRID_SPACING_DEG, GRID_SPACING_DEG)
+    lat_arr = np.arange(-10.0, 10.0 + GRID_SPACING_DEG, GRID_SPACING_DEG)
+    n_lon, n_lat = len(lon_arr), len(lat_arr)
+
+    return dict(
+        n_lon         = n_lon,
+        n_lat         = n_lat,
+        slowness_grid = np.full((n_lon, n_lat), SLOWNESS),
+        depth_grid    = np.full((n_lon, n_lat), DEPTH),
+        grad_phi      = np.zeros((n_lon - 1, n_lat)),
+        grad_colat    = np.zeros((n_lon, n_lat - 1)),
+        dphi_rad      = GRID_SPACING_DEG * DEG_TO_RAD,
+        dcolat_rad    = GRID_SPACING_DEG * DEG_TO_RAD,
+        time_arr      = np.arange(0.0, MAX_TIME + DT, DT),
+        source_ix     = int(np.argmin(np.abs(lon_arr - SOURCE_LON))),
+        source_iy     = int(np.argmin(np.abs(lat_arr - SOURCE_LAT))),
+    )
+
+
+# ── helper ────────────────────────────────────────────────────────────────────
+def _run_ray(grid, azimuth):
+    """Run _integrate_ray for a given azimuth on the flat-ocean grid."""
+    g = grid
+    return _integrate_ray(
+        g['time_arr'], DT, g['dphi_rad'], g['dcolat_rad'],
+        g['slowness_grid'], g['grad_phi'], g['grad_colat'],
+        azimuth, SOURCE_LON, SOURCE_LAT,
+        g['source_ix'], g['source_iy'], g['n_lon'], g['n_lat'], g['depth_grid'],
+    )
+
+
+def _great_circle(azimuth_deg, t):
+    """
+    Analytical great-circle position (lat_deg, lon_deg) at times t.
+    Uses the spherical law of cosines for colatitude and the four-parts
+    formula for the longitude increment.
+    """
+    theta_0 = (90.0 - SOURCE_LAT) * DEG_TO_RAD
+    phi_0   = SOURCE_LON * DEG_TO_RAD
     z_0     = azimuth_deg * DEG_TO_RAD
-    alpha   = wave_speed * t / EARTH_RADIUS    # arc angle in radians
+    alpha   = WAVE_SPEED * t / EARTH_RADIUS   # arc angle
 
-    # Standard geographic azimuth: 0=N, 90=E, 180=S (clockwise from north).
-    # z_0=0 means the ray moves toward the north pole (decreasing colatitude).
-
-    # Spherical law of cosines → colatitude along the great circle
-    cos_theta = (np.cos(theta_0) * np.cos(alpha)
-                 + np.sin(theta_0) * np.sin(alpha) * np.cos(z_0))
-    cos_theta = np.clip(cos_theta, -1.0, 1.0)
+    cos_theta = np.clip(
+        np.cos(theta_0) * np.cos(alpha)
+        + np.sin(theta_0) * np.sin(alpha) * np.cos(z_0),
+        -1.0, 1.0,
+    )
     theta_gc  = np.arccos(cos_theta)
-
-    # Longitude increment from the spherical law of sines + four-parts formula.
-    # arctan2 resolves the hemisphere ambiguity that arcsin cannot.
-    #   numerator:   sin(alpha) * sin(z_0)               [law of sines]
-    #   denominator: cos(alpha)*sin(theta_0) - cos(theta_0)*sin(alpha)*cos(z_0)
     delta_phi = np.arctan2(
         np.sin(alpha) * np.sin(z_0),
         np.cos(alpha) * np.sin(theta_0) - np.cos(theta_0) * np.sin(alpha) * np.cos(z_0),
     )
-    phi_gc = phi_0 + delta_phi
-
-    return 90.0 - theta_gc / DEG_TO_RAD, phi_gc / DEG_TO_RAD  # lat, lon
+    return 90.0 - theta_gc / DEG_TO_RAD, (phi_0 + delta_phi) / DEG_TO_RAD
 
 
-# ── run integrator and compare ────────────────────────────────────────────────
-azimuths = [0.0, 45.0, 90.0, 135.0, 180.0]
+# ── tests ─────────────────────────────────────────────────────────────────────
 
-fig, (ax_path, ax_dev) = plt.subplots(1, 2, figsize=(14, 6))
-fig.suptitle(f'RK4 integrator — flat {DEPTH:.0f} m ocean  '
-             f'(wave speed = {WAVE_SPEED:.1f} m/s)')
+@pytest.mark.parametrize("azimuth", [0.0, 45.0, 90.0, 135.0, 180.0])
+def test_great_circle_accuracy(flat_ocean, azimuth):
+    """
+    Integrated ray path must stay within 1e-3° of the analytical great circle
+    at every time step.  This bounds the RK4 truncation error for a 10 s
+    time step over a 1-hour integration on a 4000 m flat ocean.
+    """
+    phi_ray, theta_ray, *_ = _run_ray(flat_ocean, azimuth)
+    t_ray = np.arange(len(phi_ray)) * DT
 
-print(f"Wave speed : {WAVE_SPEED:.4f} m/s")
-print(f"Slowness   : {SLOWNESS:.6e} s/m")
-print(f"Grid       : {n_lon}×{n_lat} cells, {GRID_SPACING_DEG}° spacing")
-print(f"Source     : lon={SOURCE_LON}°, lat={SOURCE_LAT}°  "
-      f"→  grid cell ({source_ix}, {source_iy})")
-print()
-print(f"{'Azimuth':>10}  {'Steps':>6}  "
-      f"{'Max Δpos (°)':>14}  {'Max arc error (m)':>18}")
-print("─" * 58)
-
-all_max_devs = []
-
-for azimuth in azimuths:
-    phi_ray, theta_ray, ray_dir, ix_hist, iy_hist = _integrate_ray(
-        time_arr, DT, dphi_rad, dcolat_rad,
-        slowness_grid, slowness_grad_phi, slowness_grad_colat,
-        azimuth, SOURCE_LON, SOURCE_LAT,
-        source_ix, source_iy, n_lon, n_lat, depth_grid,
-    )
-
-    n_pts   = len(phi_ray)
-    # phi_ray[k] is the state after k steps, i.e. at time k*DT.
-    # This gives n_pts values including the initial condition, so the time
-    # axis runs [0, DT, 2*DT, ..., (n_pts-1)*DT] — one element longer than
-    # time_arr when the loop runs to completion.
-    t_ray   = np.arange(n_pts) * DT
-    lon_ray = phi_ray   / DEG_TO_RAD
+    lat_gc, lon_gc = _great_circle(azimuth, t_ray)
+    lon_ray = phi_ray / DEG_TO_RAD
     lat_ray = 90.0 - theta_ray / DEG_TO_RAD
 
-    lat_gc, lon_gc = great_circle(SOURCE_LAT, SOURCE_LON, azimuth, t_ray, WAVE_SPEED)
+    deviation = np.sqrt((lon_ray - lon_gc)**2 + (lat_ray - lat_gc)**2)
+    assert deviation.max() < 1e-3, (
+        f"azimuth {azimuth}°: max deviation {deviation.max():.2e}° exceeds 1e-3°"
+    )
 
-    # ── deviation 1: angular distance from the expected great-circle point ───
-    dev_deg = np.sqrt((lon_ray - lon_gc)**2 + (lat_ray - lat_gc)**2)
 
-    # ── deviation 2: arc-distance error relative to wave_speed × t / R ──────
-    theta_0_rad = (90.0 - SOURCE_LAT) * DEG_TO_RAD
-    phi_0_rad   = SOURCE_LON * DEG_TO_RAD
+def test_northward_ray_longitude_constant(flat_ocean):
+    """
+    A due-north ray (azimuth=0°) has dphi/dt = 0 exactly.
+    Longitude must not drift from the source value at all.
+    """
+    phi_ray, *_ = _run_ray(flat_ocean, 0.0)
+    lon_drift = np.abs(phi_ray / DEG_TO_RAD - SOURCE_LON).max()
+    assert lon_drift < 1e-10, (
+        f"Due-north ray: longitude drift {lon_drift:.2e}° (expected exactly 0)"
+    )
+
+
+def test_eastward_equatorial_ray_latitude_constant(flat_ocean):
+    """
+    A due-east ray (azimuth=90°) from the equator has dtheta/dt = 0 exactly
+    because sin(theta)=1 and the spherical correction term vanishes.
+    Latitude must not drift from 0°.
+    """
+    _, theta_ray, *_ = _run_ray(flat_ocean, 90.0)
+    lat_drift = np.abs(90.0 - theta_ray / DEG_TO_RAD - SOURCE_LAT).max()
+    assert lat_drift < 1e-10, (
+        f"Due-east equatorial ray: latitude drift {lat_drift:.2e}° (expected exactly 0)"
+    )
+
+
+def test_arc_length_matches_wave_speed(flat_ocean):
+    """
+    On a flat ocean the ray travels at exactly sqrt(g*depth).
+    The spherical arc length from source to each recorded position must match
+    wave_speed * t to within 1 m over a 1-hour integration.
+    """
+    phi_ray, theta_ray, *_ = _run_ray(flat_ocean, 45.0)
+    t_ray = np.arange(len(phi_ray)) * DT
+
+    theta_0 = (90.0 - SOURCE_LAT) * DEG_TO_RAD
+    phi_0   = SOURCE_LON * DEG_TO_RAD
     cos_arc = np.clip(
-        np.cos(theta_ray) * np.cos(theta_0_rad)
-        + np.sin(theta_ray) * np.sin(theta_0_rad) * np.cos(phi_ray - phi_0_rad),
+        np.cos(theta_ray) * np.cos(theta_0)
+        + np.sin(theta_ray) * np.sin(theta_0) * np.cos(phi_ray - phi_0),
         -1.0, 1.0,
     )
-    arc_actual_m   = np.arccos(cos_arc) * EARTH_RADIUS
-    arc_expected_m = WAVE_SPEED * t_ray
-    max_arc_err_m  = float(np.abs(arc_actual_m - arc_expected_m).max())
-
-    max_dev = float(dev_deg.max())
-    all_max_devs.append(max_dev)
-
-    print(f"{azimuth:>10.1f}°  {n_pts:>6d}  {max_dev:>14.4e}  {max_arc_err_m:>18.4f}")
-
-    label = f'{azimuth:.0f}°'
-    color = f'C{azimuths.index(azimuth)}'
-    ax_path.plot(lon_ray, lat_ray, color=color, lw=2, label=label)
-    ax_path.plot(lon_gc,  lat_gc,  color=color, lw=1, ls='--', alpha=0.5)
-    ax_dev.semilogy(t_ray / 60.0, np.maximum(dev_deg, 1e-15), color=color, label=label)
-
-# ── exact symmetry checks for the two analytically trivial azimuths ──────────
-print()
-
-# azimuth = 0°: northward ray — longitude must be exactly constant
-phi_n, theta_n, *_ = _integrate_ray(
-    time_arr, DT, dphi_rad, dcolat_rad,
-    slowness_grid, slowness_grad_phi, slowness_grad_colat,
-    0.0, SOURCE_LON, SOURCE_LAT,
-    source_ix, source_iy, n_lon, n_lat, depth_grid,
-)
-lon_drift_north = float(np.abs(phi_n / DEG_TO_RAD - SOURCE_LON).max())
-print(f"Due-north ray (az=0°)   max lon drift : {lon_drift_north:.2e}°  "
-      f"(expected: 0)")
-
-# azimuth = 90°: eastward ray at the equator — latitude must be exactly constant
-_, theta_e, *_ = _integrate_ray(
-    time_arr, DT, dphi_rad, dcolat_rad,
-    slowness_grid, slowness_grad_phi, slowness_grad_colat,
-    90.0, SOURCE_LON, SOURCE_LAT,
-    source_ix, source_iy, n_lon, n_lat, depth_grid,
-)
-lat_drift_east = float(np.abs(90.0 - theta_e / DEG_TO_RAD - SOURCE_LAT).max())
-print(f"Due-east  ray (az=90°)  max lat drift : {lat_drift_east:.2e}°  "
-      f"(expected: 0)")
-
-print()
-print(f"Max deviation from straight line across all azimuths: "
-      f"{max(all_max_devs):.4e}°")
-
-# ── finalise plots ────────────────────────────────────────────────────────────
-ax_path.plot(SOURCE_LON, SOURCE_LAT, 'k*', ms=10, zorder=5, label='source')
-ax_path.set_xlabel('Longitude (°)')
-ax_path.set_ylabel('Latitude (°)')
-ax_path.set_title('Ray paths (solid) vs great circles (dashed)')
-ax_path.legend(title='Azimuth', fontsize=8)
-ax_path.set_aspect('equal')
-ax_path.grid(True, alpha=0.3)
-
-ax_dev.set_xlabel('Time (min)')
-ax_dev.set_ylabel('Deviation from great circle (°)')
-ax_dev.set_title('Positional error vs expected great-circle path')
-ax_dev.legend(title='Azimuth', fontsize=8)
-ax_dev.grid(True, which='both', alpha=0.3)
-
-plt.tight_layout()
-plt.savefig('test_rk4_flat_ocean.png', dpi=150)
-plt.show()
-print("Plot saved: test_rk4_flat_ocean.png")
+    arc_m     = np.arccos(cos_arc) * EARTH_RADIUS
+    expected_m = WAVE_SPEED * t_ray
+    max_err_m  = np.abs(arc_m - expected_m).max()
+    assert max_err_m < 1.0, (
+        f"Arc length error {max_err_m:.2f} m exceeds 1 m tolerance"
+    )
