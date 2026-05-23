@@ -18,6 +18,8 @@ dψ/dt  = −sin(ψ) · ∂n/∂θ / (n² · R)
 
 where `n = 1/c` is the slowness and `R` is Earth's radius. The third term in the direction equation is a spherical correction for meridian convergence. Each ray is integrated until it reaches the grid boundary, water shallower than 10 m, or a dry cell.
 
+The colatitude step `dcolat_rad` is **signed**: when `lat_arr` is ascending (the usual convention), colatitude decreases as the array index increases, so `dcolat_rad` is negative. The sign governs grid-cell index snapping and the direction of the slowness gradient — reversing it mirrors the effective latitude axis and sends rays in the wrong direction.
+
 ## Attribution
 
 This implementation follows the ray-tracing methodology described in:
@@ -35,8 +37,11 @@ TsunamiTrace/
 │   ├── __init__.py        # Public API — exposes trace_rays()
 │   ├── raytracing.py      # trace_rays(): builds slowness field, fans rays
 │   └── _rungekutta.py     # _integrate_rays(): vectorised RK4 integrator for all rays
+├── data/
+│   └── cascadia.xyz       # GEBCO-derived 30 arc-second bathymetry (Git LFS)
 ├── examples/
-│   └── ridge_refraction.ipynb   # Ray refraction across a synthetic submarine ridge
+│   ├── ridge_refraction.ipynb     # Ray refraction across a synthetic submarine ridge
+│   └── cascadia_travel_times.ipynb  # Regional travel times for a Cascadia megathrust scenario
 ├── tests/
 │   ├── test_rk4.py        # Unit tests for the RK4 integrator (great-circle accuracy)
 │   └── test_trace_rays.py # Integration tests for trace_rays() (shape, symmetry, Snell's law)
@@ -100,22 +105,27 @@ Or with verbose output:
 pytest -v
 ```
 
-The test suite has 13 tests across two files:
+The test suite has 14 tests across two files:
 
 | File | Tests |
 |------|-------|
 | `tests/test_rk4.py` | RK4 integrator unit tests: great-circle accuracy across 5 azimuths, zero longitude drift for due-north ray, zero latitude drift for due-east equatorial ray, arc-length error < 1 m over 1 hour |
-| `tests/test_trace_rays.py` | Integration tests: output shape, invalid-depth-shape error, NaN consistency, meridional symmetry, Snell's law slowdown across a submarine ridge |
+| `tests/test_trace_rays.py` | Integration tests: output shape, invalid-depth-shape error, NaN consistency, meridional symmetry, Snell's law slowdown across a submarine ridge, Snell's law refraction direction on a north-deepening gradient |
 
 ## Examples
 
 `examples/ridge_refraction.ipynb` — Jupyter notebook demonstrating ray refraction across a synthetic N–S submarine ridge. A Gaussian ridge sits between the source and the western edge of the domain; the shallow ridge crest slows the wave from ~221 m/s (deep ocean) to ~63 m/s (ridge crest), bending rays toward the normal to the isobaths.
 
-To run it:
+`examples/cascadia_travel_times.ipynb` — Real-bathymetry example using a GEBCO-derived 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 1800 rays from a source on the locked zone of the megathrust (47.86°N, 124.91°W) and produces an interpolated first-arrival travel time map for the Pacific Northwest coast. Requires `scipy` and `pandas` (`pip install -e ".[examples]"`).
+
+The bathymetry file (`data/cascadia.xyz`) is stored in Git LFS. After cloning, run `git lfs pull` if the file is not automatically retrieved.
+
+To run the examples:
 
 ```bash
 conda activate tsunamitrace
 jupyter notebook examples/ridge_refraction.ipynb
+jupyter notebook examples/cascadia_travel_times.ipynb
 ```
 
 ## Performance
@@ -128,6 +138,8 @@ On a 350 × 400 grid with a 30 s time step and 4-hour integration this gives rou
 |-----------|-----------|
 | 180 rays  | ~70 ms    |
 | 720 rays  | ~125 ms   |
+
+The Cascadia example runs 1800 rays on a 1080 × 1560 grid (dt = 60 s, 4-hour integration) in a few seconds on a laptop.
 
 Scaling with ray count is much flatter than a sequential loop because the per-ray overhead is absorbed into NumPy's C-level inner loop.
 
