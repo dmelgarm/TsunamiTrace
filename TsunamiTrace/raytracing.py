@@ -9,7 +9,7 @@ Implements the ray-tracing approach from:
 Originally implemented in MATLAB; this is the Python port.
 """
 import numpy as np
-from ._rungekutta import _integrate_ray
+from ._rungekutta import _integrate_rays
 
 
 def trace_rays(lon_arr, lat_arr, depth, dt, max_time,
@@ -139,24 +139,16 @@ def trace_rays(lon_arr, lat_arr, depth, dt, max_time,
     n_steps = len(time_arr) + 1
     n_rays  = len(azimuths_deg)
 
-    # ── output arrays (NaN pre-filled) ───────────────────────────────────────
-    ray_lon_deg = np.full((n_rays, n_steps), np.nan)
-    ray_lat_deg = np.full((n_rays, n_steps), np.nan)
-    ray_dir_deg = np.full((n_rays, n_steps), np.nan)
+    # ── ray integration — all rays advanced simultaneously ───────────────────
+    out_phi, out_theta, out_ray_dir = _integrate_rays(
+        time_arr, dt, dphi_rad, dcolat_rad,
+        slowness, slowness_grad_phi, slowness_grad_colat,
+        azimuths_deg, source_lon, source_lat,
+        source_ix, source_iy, n_lon, n_lat, local_depth,
+    )
 
-    # ── ray integration loop ──────────────────────────────────────────────────
-    for ray_idx, azimuth in enumerate(azimuths_deg):
-        phi, theta, ray_dir, _ix_hist, _iy_hist = _integrate_ray(
-            time_arr, dt, dphi_rad, dcolat_rad,
-            slowness, slowness_grad_phi, slowness_grad_colat,
-            azimuth, source_lon, source_lat,
-            source_ix, source_iy, n_lon, n_lat, local_depth,
-        )
-
-        n_pts = len(phi)   # <= n_steps; fewer if the ray terminated early
-
-        ray_lon_deg[ray_idx, :n_pts] = phi    / DEG_TO_RAD
-        ray_lat_deg[ray_idx, :n_pts] = 90.0 - theta   / DEG_TO_RAD
-        ray_dir_deg[ray_idx, :n_pts] = ray_dir / DEG_TO_RAD
+    ray_lon_deg = out_phi     / DEG_TO_RAD
+    ray_lat_deg = 90.0 - out_theta / DEG_TO_RAD
+    ray_dir_deg = out_ray_dir / DEG_TO_RAD
 
     return ray_lon_deg, ray_lat_deg, ray_dir_deg

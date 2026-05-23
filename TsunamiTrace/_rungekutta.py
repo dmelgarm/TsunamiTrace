@@ -1,5 +1,5 @@
 """
-Single-ray RK4 integrator for tsunami ray tracing.
+Vectorised RK4 integrator for tsunami ray tracing.
 
 Implements the ray-tracing approach from:
   Gusman, A. R., Satake, K., Shinohara, M., Sakai, S. I., & Tanioka, Y. (2017).
@@ -10,76 +10,84 @@ Originally implemented in MATLAB; this is the Python port.
 """
 import numpy as np
 
+_EARTH_RADIUS = 6_371_000.0   # metres
+_DEG_TO_RAD   = np.pi / 180.0
 
-def _integrate_ray(time_arr, dt, dphi_rad, dcolat_rad,
-                   slowness, slowness_grad_phi, slowness_grad_colat,
-                   initial_azimuth_deg, source_lon, source_lat,
-                   source_ix, source_iy, n_lon, n_lat, depth):
+
+# ── ODE right-hand sides ──────────────────────────────────────────────────────
+# Module-level so they are not re-created inside the integration loop.
+
+def _dtheta(theta, ray_dir, n, R):
+    return np.cos(ray_dir) / (n * R)
+
+
+def _dphi(theta, ray_dir, n, R):
+    # sin(theta) in the denominator: faster longitudinal drift near the poles
+    return np.sin(ray_dir) / (n * R * np.sin(theta))
+
+
+def _ddir(theta, ray_dir, n, dn_dcolat, dn_dphi, R):
+    # First two terms: Snell's-law refraction from the slowness gradient.
+    # Third term: spherical correction for meridian convergence (cot theta).
+    sin_d = np.sin(ray_dir)
+    cos_d = np.cos(ray_dir)
+    sin_t = np.sin(theta)
+    cos_t = np.cos(theta)
+    return (
+        -sin_d * dn_dcolat / (n**2 * R)
+        + cos_d * dn_dphi  / (n**2 * R * sin_t)
+        - sin_d * cos_t    / (n * R * sin_t)
+    )
+
+
+# ── vectorised integrator ─────────────────────────────────────────────────────
+
+def _integrate_rays(time_arr, dt, dphi_rad, dcolat_rad,
+                    slowness, slowness_grad_phi, slowness_grad_colat,
+                    azimuths_deg, source_lon, source_lat,
+                    source_ix, source_iy, n_lon, n_lat, depth):
     """
-    Integrate a single tsunami ray on a sphere using 4th-order Runge-Kutta.
+    Integrate all tsunami rays simultaneously using vectorised RK4.
 
-    The state vector is (theta, phi, ray_dir) where theta is colatitude, phi
-    is longitude (both in radians), and ray_dir is the propagation direction
-    in radians.  Slowness and its spatial gradients are frozen from the grid
-    cell at the start of each time step and held constant through all four
-    RK stages, consistent with a piecewise-constant medium across each cell.
+    All rays share the same bathymetry grid and are advanced together at each
+    time step.  A boolean mask eliminates terminated rays from further
+    computation without padding their output arrays.
 
     Parameters
     ----------
-    time_arr : array_like, shape (N,)
-        Time array in seconds, evenly spaced with step dt.  Typically built
-        with ``np.arange(0, max_time + dt, dt)``.
+    time_arr : ndarray, shape (N,)
+        Time array in seconds, evenly spaced with step dt.
     dt : float
         Time step in seconds.
     dphi_rad : float
-        Grid spacing in the longitude (phi) direction, in radians.
+        Grid spacing in the longitude (phi) direction, radians.
     dcolat_rad : float
-        Grid spacing in the colatitude (theta) direction, in radians.
+        Grid spacing in the colatitude (theta) direction, radians.
     slowness : ndarray, shape (n_lon, n_lat)
-        Slowness field 1/sqrt(g * depth) in s/m, indexed [lon_idx, lat_idx].
-        Land cells must be pre-set to a sentinel >= 1 so that the
-        ``n_here >= 1`` termination check fires correctly.
+        Slowness 1/sqrt(g*depth) in s/m.  Land cells pre-set to >= 1.
     slowness_grad_phi : ndarray, shape (n_lon-1, n_lat)
-        Slowness gradient along the longitude axis (dn/dphi), s/(m*rad).
-        Built from ``np.diff(slowness, axis=0) / dphi_rad``.
+        dn/dphi in s/(m·rad), from np.diff(slowness, axis=0) / dphi_rad.
     slowness_grad_colat : ndarray, shape (n_lon, n_lat-1)
-        Slowness gradient along the colatitude axis (dn/dtheta), s/(m*rad).
-        Built from ``np.diff(slowness, axis=1) / dcolat_rad``.
-    initial_azimuth_deg : float
-        Initial ray azimuth in degrees: 0 = north, 90 = east, 180 = south,
-        270 = west (clockwise from north).
-        Internally converted to the ODE angle (CCW from +e_theta) via
-        z = (180 - azimuth_deg) * pi/180.
-    source_lon : float
-        Source longitude in degrees.
-    source_lat : float
-        Source latitude in degrees.
-    source_ix : int
-        Source grid index along the longitude axis, 0-based.
-    source_iy : int
-        Source grid index along the colatitude axis, 0-based.
-    n_lon : int
-        Grid size along the longitude axis (first dimension of slowness).
-    n_lat : int
-        Grid size along the colatitude axis (second dimension of slowness).
+        dn/dtheta in s/(m·rad), from np.diff(slowness, axis=1) / dcolat_rad.
+    azimuths_deg : array_like, shape (n_rays,)
+        Initial ray azimuths in degrees (0=N, 90=E, 180=S, 270=W).
+    source_lon, source_lat : float
+        Source position in degrees.
+    source_ix, source_iy : int
+        Nearest grid indices to the source.
+    n_lon, n_lat : int
+        Grid dimensions.
     depth : ndarray, shape (n_lon, n_lat)
-        Bathymetry in metres (positive = ocean depth), indexed [lon_idx, lat_idx].
+        Bathymetry in metres (positive = water).
 
     Returns
     -------
-    phi : ndarray of float
-        Ray longitude in radians at each recorded state.  At most
-        len(time_arr) + 1 values (initial condition plus one per completed
-        step); shorter if the ray terminates early.
-    theta : ndarray of float
-        Ray colatitude in radians, same length as phi.
-    ray_dir : ndarray of float
-        Ray direction in radians, same length as phi.
-    ix_hist : ndarray of int
-        Grid longitude index (0-based) recorded after each RK step.
-        At most len(time_arr) values; shorter on early exit.
-    iy_hist : ndarray of int
-        Grid colatitude index (0-based), same length as ix_hist.
+    out_phi : ndarray, shape (n_rays, n_steps)
+        Ray longitude in radians.  NaN after each ray terminates.
+    out_theta : ndarray, shape (n_rays, n_steps)
+        Ray colatitude in radians.  NaN after termination.
+    out_ray_dir : ndarray, shape (n_rays, n_steps)
+        Ray direction in radians.  NaN after termination.
 
     Notes
     -----
@@ -91,152 +99,108 @@ def _integrate_ray(time_arr, dt, dphi_rad, dcolat_rad,
                       + cos(ray_dir) * dn/dphi   / (n^2 * R * sin(theta))
                       - sin(ray_dir) * cos(theta) / (n * R * sin(theta))
 
-    The third term is the spherical correction for meridian convergence
-    (equivalent to -sin(ray_dir) * cot(theta) / (n * R)).
+    Termination fires when any of these conditions holds for a given ray:
+      1. Grid boundary: lon_idx outside [0, n_lon-2] or lat_idx outside [0, n_lat-2].
+      2. Shallow water or land: depth < 10 m.
+      3. Land sentinel: n_here >= 1.
 
-    Integration terminates early when any of these conditions is met:
-      1. Grid boundary: lon_idx outside [0, n_lon-2] or
-         lat_idx outside [0, n_lat-2].
-         (slowness_grad_phi has shape (n_lon-1, n_lat), so n_lon-2 is the
-          last valid lon index; slowness_grad_colat has shape (n_lon, n_lat-1),
-          so n_lat-2 is the last valid lat index.)
-      2. Shallow water / land: depth[lon_idx, lat_idx] < 10 m.
-      3. Degenerate slowness: n_here >= 1 (land sentinel set by the caller).
+    Slowness and its gradients are frozen at the grid cell corresponding to
+    the ray's position at the start of each time step and held constant
+    through all four RK stages (piecewise-constant medium per cell).
     """
-    DEG_TO_RAD   = np.pi / 180.0
-    EARTH_RADIUS = 6_371_000.0    # metres
+    R      = _EARTH_RADIUS
+    n_rays = len(azimuths_deg)
+    n_steps = len(time_arr) + 1
 
-    # -------------------------------------------------------------------------
-    # Initial conditions stored as lists that grow one element per step.
-    # -------------------------------------------------------------------------
-    phi     = [source_lon * DEG_TO_RAD]           # longitude, rad
-    theta   = [(90.0 - source_lat) * DEG_TO_RAD]  # colatitude = 90° - latitude, rad
-    # Convert geographic azimuth (clockwise from north) to the ODE's internal
-    # angle (CCW from +e_theta, the southward unit vector):
-    #   z_internal = pi - azimuth_geographic
-    # At z=0 the ray moves southward (dtheta/dt > 0); at z=pi, northward.
-    ray_dir = [(180.0 - initial_azimuth_deg) * DEG_TO_RAD]
+    # Pre-allocate output arrays — NaN marks positions after termination
+    out_phi     = np.full((n_rays, n_steps), np.nan)
+    out_theta   = np.full((n_rays, n_steps), np.nan)
+    out_ray_dir = np.full((n_rays, n_steps), np.nan)
 
-    ix_hist: list[int] = []
-    iy_hist: list[int] = []
+    # Initial conditions — all rays start from the same source point
+    phi0   = source_lon * _DEG_TO_RAD
+    theta0 = (90.0 - source_lat) * _DEG_TO_RAD
 
-    # lon_idx / lat_idx track the current grid cell; updated after each RK step.
-    lon_idx = source_ix
-    lat_idx = source_iy
+    phi     = np.full(n_rays, phi0)
+    theta   = np.full(n_rays, theta0)
+    # Convert geographic azimuth (CW from N) to ODE angle (CCW from +e_theta):
+    # z = pi - azimuth  →  z=0 points south, z=pi points north
+    ray_dir = (180.0 - np.asarray(azimuths_deg, dtype=float)) * _DEG_TO_RAD
 
-    for i in range(len(time_arr)):
+    out_phi[:, 0]     = phi
+    out_theta[:, 0]   = theta
+    out_ray_dir[:, 0] = ray_dir
 
-        # ---------------------------------------------------------------------
-        # Freeze slowness and its gradients at the current cell for all four
-        # RK stages.  This is equivalent to assuming a locally uniform medium
-        # within each grid cell.
-        # ---------------------------------------------------------------------
-        n_here         = slowness[lon_idx, lat_idx]
-        dn_dphi_here   = slowness_grad_phi[lon_idx, lat_idx]
-        dn_dcolat_here = slowness_grad_colat[lon_idx, lat_idx]
+    alive = np.ones(n_rays, dtype=bool)
 
-        # ---------------------------------------------------------------------
-        # ODE right-hand sides.
-        # phi does not appear explicitly in any equation, so only
-        # (theta_v, dir_v) are needed as arguments.
-        # ---------------------------------------------------------------------
-
-        def colat_rate(theta_v, dir_v):
-            # dtheta/dt: colatitude changes at cos(ray_dir) / (n * R)
-            return np.cos(dir_v) / (n_here * EARTH_RADIUS)
-
-        def lon_rate(theta_v, dir_v):
-            # dphi/dt: sin(theta) in the denominator causes faster longitudinal
-            # drift near the poles where meridians converge
-            return np.sin(dir_v) / (n_here * EARTH_RADIUS * np.sin(theta_v))
-
-        def dir_rate(theta_v, dir_v):
-            # dray_dir/dt: first two terms are Snell's law refraction due to
-            # the slowness gradient; third term is the spherical correction
-            # for meridian convergence (cot(theta) written as cos/sin)
-            return (
-                -np.sin(dir_v) * dn_dcolat_here / (n_here**2 * EARTH_RADIUS)
-                + np.cos(dir_v) * dn_dphi_here / (n_here**2 * EARTH_RADIUS * np.sin(theta_v))
-                - np.sin(dir_v) * np.cos(theta_v) / (n_here * EARTH_RADIUS * np.sin(theta_v))
-            )
-
-        # ---------------------------------------------------------------------
-        # RK4 — stage 1: slopes at the start of the interval
-        # ---------------------------------------------------------------------
-        dtheta_1 = colat_rate(theta[i], ray_dir[i])
-        dphi_1   = lon_rate(  theta[i], ray_dir[i])
-        ddir_1   = dir_rate(  theta[i], ray_dir[i])
-
-        # ---------------------------------------------------------------------
-        # RK4 — stage 2: midpoint estimate using stage-1 slopes
-        # ---------------------------------------------------------------------
-        theta_s2 = theta[i]   + 0.5 * dt * dtheta_1
-        dir_s2   = ray_dir[i] + 0.5 * dt * ddir_1
-        dtheta_2 = colat_rate(theta_s2, dir_s2)
-        dphi_2   = lon_rate(  theta_s2, dir_s2)
-        ddir_2   = dir_rate(  theta_s2, dir_s2)
-
-        # ---------------------------------------------------------------------
-        # RK4 — stage 3: second midpoint estimate using stage-2 slopes
-        # ---------------------------------------------------------------------
-        theta_s3 = theta[i]   + 0.5 * dt * dtheta_2
-        dir_s3   = ray_dir[i] + 0.5 * dt * ddir_2
-        dtheta_3 = colat_rate(theta_s3, dir_s3)
-        dphi_3   = lon_rate(  theta_s3, dir_s3)
-        ddir_3   = dir_rate(  theta_s3, dir_s3)
-
-        # ---------------------------------------------------------------------
-        # RK4 — stage 4: endpoint estimate using stage-3 slopes
-        # ---------------------------------------------------------------------
-        theta_s4 = theta[i]   + dt * dtheta_3
-        dir_s4   = ray_dir[i] + dt * ddir_3
-        dtheta_4 = colat_rate(theta_s4, dir_s4)
-        dphi_4   = lon_rate(  theta_s4, dir_s4)
-        ddir_4   = dir_rate(  theta_s4, dir_s4)
-
-        # ---------------------------------------------------------------------
-        # Advance state: Simpson-weighted average of the four slope estimates
-        # ---------------------------------------------------------------------
-        theta.append(
-            theta[i] + (dtheta_1 + 2*dtheta_2 + 2*dtheta_3 + dtheta_4) * dt / 6.0
-        )
-        phi.append(
-            phi[i] + (dphi_1 + 2*dphi_2 + 2*dphi_3 + dphi_4) * dt / 6.0
-        )
-        ray_dir.append(
-            ray_dir[i] + (ddir_1 + 2*ddir_2 + 2*ddir_3 + ddir_4) * dt / 6.0
-        )
-
-        # ---------------------------------------------------------------------
-        # Update grid index by measuring cumulative angular displacement from
-        # the source position and snapping to the nearest grid cell.
-        # ---------------------------------------------------------------------
-        lon_idx = source_ix + int(round((phi[i]   - phi[0])   / dphi_rad))
-        lat_idx = source_iy + int(round((theta[i] - theta[0]) / dcolat_rad))
-        ix_hist.append(lon_idx)
-        iy_hist.append(lat_idx)
-
-        # ---------------------------------------------------------------------
-        # Termination checks.
-        # ---------------------------------------------------------------------
-
-        # 1. Grid boundary — gradient arrays are one cell shorter on each axis,
-        #    so the last usable index is n_lon-2 (lon) and n_lat-2 (lat).
-        if lon_idx < 0 or lon_idx > n_lon - 2 or lat_idx < 0 or lat_idx > n_lat - 2:
+    for step in range(len(time_arr)):
+        if not alive.any():
             break
 
-        # 2. Shallow water or land.
-        if depth[lon_idx, lat_idx] < 10:
-            break
+        # Snap current position to nearest grid cell
+        lon_idx = source_ix + np.round((phi   - phi0)   / dphi_rad).astype(int)
+        lat_idx = source_iy + np.round((theta - theta0) / dcolat_rad).astype(int)
 
-        # 3. Degenerate slowness (land sentinel or stalled ray).
-        if n_here >= 1:
-            break
+        # Clip to valid index ranges before array access —
+        # dead rays may have wandered outside the grid.
+        ix    = np.clip(lon_idx, 0, n_lon - 2)   # slowness_grad_phi  axis-0 limit
+        iy    = np.clip(lat_idx, 0, n_lat - 1)
+        iy_gc = np.clip(lat_idx, 0, n_lat - 2)   # slowness_grad_colat axis-1 limit
 
-    return (
-        np.array(phi),
-        np.array(theta),
-        np.array(ray_dir),
-        np.array(ix_hist, dtype=int),
-        np.array(iy_hist, dtype=int),
-    )
+        # Freeze local medium at the current grid cell for all four RK stages
+        n_here         = slowness[ix, iy]
+        dn_dphi_here   = slowness_grad_phi[ix, iy]
+        dn_dcolat_here = slowness_grad_colat[ix, iy_gc]
+
+        # ── RK4 ──────────────────────────────────────────────────────────────
+        k1_t = _dtheta(theta, ray_dir, n_here, R)
+        k1_p = _dphi(  theta, ray_dir, n_here, R)
+        k1_d = _ddir(  theta, ray_dir, n_here, dn_dcolat_here, dn_dphi_here, R)
+
+        t2 = theta   + 0.5 * dt * k1_t
+        d2 = ray_dir + 0.5 * dt * k1_d
+        k2_t = _dtheta(t2, d2, n_here, R)
+        k2_p = _dphi(  t2, d2, n_here, R)
+        k2_d = _ddir(  t2, d2, n_here, dn_dcolat_here, dn_dphi_here, R)
+
+        t3 = theta   + 0.5 * dt * k2_t
+        d3 = ray_dir + 0.5 * dt * k2_d
+        k3_t = _dtheta(t3, d3, n_here, R)
+        k3_p = _dphi(  t3, d3, n_here, R)
+        k3_d = _ddir(  t3, d3, n_here, dn_dcolat_here, dn_dphi_here, R)
+
+        t4 = theta   + dt * k3_t
+        d4 = ray_dir + dt * k3_d
+        k4_t = _dtheta(t4, d4, n_here, R)
+        k4_p = _dphi(  t4, d4, n_here, R)
+        k4_d = _ddir(  t4, d4, n_here, dn_dcolat_here, dn_dphi_here, R)
+
+        # Simpson-weighted update
+        dt6 = dt / 6.0
+        new_theta   = theta   + (k1_t + 2*k2_t + 2*k3_t + k4_t) * dt6
+        new_phi     = phi     + (k1_p + 2*k2_p + 2*k3_p + k4_p) * dt6
+        new_ray_dir = ray_dir + (k1_d + 2*k2_d + 2*k3_d + k4_d) * dt6
+
+        # Apply update only to rays still alive
+        theta   = np.where(alive, new_theta,   theta)
+        phi     = np.where(alive, new_phi,     phi)
+        ray_dir = np.where(alive, new_ray_dir, ray_dir)
+
+        # Record new state before applying termination
+        out_phi[alive, step + 1]     = phi[alive]
+        out_theta[alive, step + 1]   = theta[alive]
+        out_ray_dir[alive, step + 1] = ray_dir[alive]
+
+        # Termination checks
+        out_of_bounds = (
+            (lon_idx < 0) | (lon_idx > n_lon - 2) |
+            (lat_idx < 0) | (lat_idx > n_lat - 2)
+        )
+        ix_d    = np.clip(lon_idx, 0, n_lon - 1)
+        iy_d    = np.clip(lat_idx, 0, n_lat - 1)
+        shallow = depth[ix_d, iy_d] < 10.0
+        land    = n_here >= 1.0
+
+        alive &= ~(out_of_bounds | shallow | land)
+
+    return out_phi, out_theta, out_ray_dir

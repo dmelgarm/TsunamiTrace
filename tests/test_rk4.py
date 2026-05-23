@@ -17,7 +17,7 @@ Tests the implementation of the ray-tracing approach from:
 """
 import numpy as np
 import pytest
-from TsunamiTrace._rungekutta import _integrate_ray
+from TsunamiTrace._rungekutta import _integrate_rays
 
 # ── physical constants ────────────────────────────────────────────────────────
 DEG_TO_RAD   = np.pi / 180.0
@@ -63,14 +63,18 @@ def flat_ocean():
 
 # ── helper ────────────────────────────────────────────────────────────────────
 def _run_ray(grid, azimuth):
-    """Run _integrate_ray for a given azimuth on the flat-ocean grid."""
+    """Run _integrate_rays for a single azimuth; return non-NaN 1-D arrays."""
     g = grid
-    return _integrate_ray(
+    out_phi, out_theta, out_ray_dir = _integrate_rays(
         g['time_arr'], DT, g['dphi_rad'], g['dcolat_rad'],
         g['slowness_grid'], g['grad_phi'], g['grad_colat'],
-        azimuth, SOURCE_LON, SOURCE_LAT,
+        np.array([azimuth], dtype=float), SOURCE_LON, SOURCE_LAT,
         g['source_ix'], g['source_iy'], g['n_lon'], g['n_lat'], g['depth_grid'],
     )
+    # Squeeze the ray dimension and strip trailing NaNs
+    phi_ray = out_phi[0]
+    valid   = ~np.isnan(phi_ray)
+    return phi_ray[valid], out_theta[0, valid], out_ray_dir[0, valid], None, None
 
 
 def _great_circle(azimuth_deg, t):
