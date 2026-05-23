@@ -15,7 +15,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev      = ["pytest"]
+examples = ["scipy", "pandas"]
 
 [project.urls]
 Repository = "https://github.com/dmelgarm/TsunamiTrace"
