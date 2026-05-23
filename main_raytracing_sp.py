@@ -111,14 +111,18 @@ print(f"Rays terminated before max_time: {n_terminated}/{n_rays}")
 fig, ax = plt.subplots(figsize=(7, 7))
 
 levels = np.linspace(depth.min(), depth.max(), 25)
-cf = ax.contourf(lon_arr, lat_arr, depth.T,
+cf = ax.contourf(lon_arr, lat_arr, depth,
                  levels=levels, cmap='RdBu_r', alpha=0.75)
-ax.contour(lon_arr, lat_arr, depth.T,
-           levels=levels, colors='k', linewidths=0.3, alpha=0.4)
 
 # Zero-depth contour marks the coastline
-ax.contour(lon_arr, lat_arr, depth.T,
+ax.contour(lon_arr, lat_arr, depth,
            levels=[0], colors='b', linewidths=1.2)
+
+
+ax.contour(lon_arr, lat_arr, depth,
+           levels=levels, colors='k', linewidths=0.3, alpha=0.4)
+
+
 
 # NaN values in the ray arrays break the plotted line at termination points
 for ray_idx in range(n_rays):
