@@ -57,8 +57,9 @@ TsunamiTrace/
 │   ├── cascadia.xyz            # GEBCO 30 arc-second bathymetry, Cascadia (Git LFS)
 │   └── NE_pacific_4arcmin.nc  # GEBCO 4 arc-minute bathymetry, NE Pacific / Alaska
 ├── examples/
-│   ├── ridge_refraction.ipynb     # Ray refraction across a synthetic submarine ridge
-│   └── cascadia_travel_times.ipynb  # Regional travel times for a Cascadia megathrust scenario
+│   ├── ridge_refraction.ipynb              # Ray refraction across a synthetic submarine ridge
+│   ├── cascadia_travel_times.ipynb         # Regional travel times for a Cascadia megathrust scenario
+│   └── alaska_point_vs_finite_fault.ipynb  # Point source vs finite fault, 1964 Alaska earthquake
 ├── tests/
 │   ├── test_rk4.py        # Unit tests for the RK4 integrator (great-circle accuracy)
 │   └── test_trace_rays.py # Integration tests for trace_rays() (shape, symmetry, Snell's law)
@@ -187,6 +188,8 @@ The test suite has 14 tests across two files:
 
 `examples/cascadia_travel_times.ipynb`: Real-bathymetry example using a GEBCO-derived 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 36,000 rays from a source on the locked zone of the megathrust (47.86°N, 124.91°W) and produces a first-arrival travel time map for the Pacific Northwest coast using `tt.grid_travel_times`. Requires `scipy` (`pip install -e ".[examples]"`).
 
+`examples/alaska_point_vs_finite_fault.ipynb`: Trans-oceanic travel time example using a GEBCO-derived 4 arc-minute NetCDF grid of the NE Pacific. Models the 1964 Alaska earthquake source (nudged offshore to 60.07°N, 146.68°W) and integrates 360,000 rays for 12 hours to capture trans-oceanic propagation. Compares point-source and finite-fault approaches. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
+
 `data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. `data/NE_pacific_4arcmin.nc` is small enough (2.9 MB) to be committed directly.
 
 To run the examples:
@@ -195,6 +198,7 @@ To run the examples:
 conda activate tsunamitrace
 jupyter notebook examples/ridge_refraction.ipynb
 jupyter notebook examples/cascadia_travel_times.ipynb
+jupyter notebook examples/alaska_point_vs_finite_fault.ipynb
 ```
 
 ## Performance
