@@ -34,9 +34,10 @@ https://github.com/adityagusman/tsunami-raytracing
 ```
 TsunamiTrace/
 ├── TsunamiTrace/
-│   ├── __init__.py        # Public API — exposes trace_rays()
+│   ├── __init__.py        # Public API — exposes trace_rays(), load_bathymetry()
 │   ├── raytracing.py      # trace_rays(): builds slowness field, fans rays
-│   └── _rungekutta.py     # _integrate_rays(): vectorised RK4 integrator for all rays
+│   ├── _rungekutta.py     # _integrate_rays(): vectorised RK4 integrator for all rays
+│   └── io.py              # load_bathymetry(): bathymetry file loaders
 ├── data/
 │   └── cascadia.xyz       # GEBCO-derived 30 arc-second bathymetry (Git LFS)
 ├── examples/
@@ -75,14 +76,36 @@ pip install -e ".[dev]"
 
 ## Usage
 
+### Loading bathymetry
+
+```python
+import TsunamiTrace as tt
+
+# Load a three-column lon/lat/depth ASCII file.
+# negate=True (default) converts from the standard geographic convention
+# (negative = ocean) to the TsunamiTrace convention (positive = ocean).
+lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.xyz')
+
+# If your file already stores ocean depth as positive, pass negate=False:
+lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.xyz', negate=False)
+
+# depth shape is (n_lon, n_lat) — ready for trace_rays.
+# For matplotlib contour plots transpose to row-major (n_lat, n_lon):
+#   plt.contourf(lon_arr, lat_arr, depth.T)
+```
+
+### Ray tracing
+
 ```python
 import numpy as np
 import TsunamiTrace as tt
 
+lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.xyz')
+
 ray_lon, ray_lat, ray_dir = tt.trace_rays(
     lon_arr,      # 1-D array of longitudes (degrees)
     lat_arr,      # 1-D array of latitudes (degrees)
-    depth,        # 2-D depth array, shape (n_lon, n_lat), metres
+    depth,        # 2-D depth array, shape (n_lon, n_lat), positive = ocean
     dt=30,        # time step (seconds)
     max_time=7200,
     source_lon=157.0,
@@ -116,7 +139,7 @@ The test suite has 14 tests across two files:
 
 `examples/ridge_refraction.ipynb` — Jupyter notebook demonstrating ray refraction across a synthetic N–S submarine ridge. A Gaussian ridge sits between the source and the western edge of the domain; the shallow ridge crest slows the wave from ~221 m/s (deep ocean) to ~63 m/s (ridge crest), bending rays toward the normal to the isobaths.
 
-`examples/cascadia_travel_times.ipynb` — Real-bathymetry example using a GEBCO-derived 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 1800 rays from a source on the locked zone of the megathrust (47.86°N, 124.91°W) and produces an interpolated first-arrival travel time map for the Pacific Northwest coast. Requires `scipy` and `pandas` (`pip install -e ".[examples]"`).
+`examples/cascadia_travel_times.ipynb` — Real-bathymetry example using a GEBCO-derived 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 36,000 rays from a source on the locked zone of the megathrust (47.86°N, 124.91°W) and produces a first-arrival travel time map for the Pacific Northwest coast. Travel times are computed with `scipy.stats.binned_statistic_2d` — each geographic bin keeps only the earliest-arriving ray, which is physically correct when multiple rays cross the same area at different times. Requires `scipy` (`pip install -e ".[examples]"`).
 
 The bathymetry file (`data/cascadia.xyz`) is stored in Git LFS. After cloning, run `git lfs pull` if the file is not automatically retrieved.
 
@@ -145,7 +168,11 @@ Scaling with ray count is much flatter than a sequential loop because the per-ra
 
 ## Dependencies
 
-- Python 3.9+
-- NumPy
-- Matplotlib
-- pytest (for tests, optional)
+| Package | Required for |
+|---------|-------------|
+| Python 3.9+ | — |
+| NumPy | core ray tracing |
+| Matplotlib | — |
+| pandas | `load_bathymetry()` (optional — falls back to `numpy.loadtxt` if absent) |
+| scipy | examples (travel time binning and interpolation) |
+| pytest | tests (`pip install -e ".[dev]"`) |

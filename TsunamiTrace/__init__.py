@@ -22,6 +22,8 @@ tsunami waveforms. Pure and Applied Geophysics, 174(8), 2925-2943.
 https://doi.org/10.1007/s00024-017-1590-2
 """
 from .raytracing import trace_rays
+from . import io
+from .io import load_bathymetry
 
-__all__ = ["trace_rays"]
+__all__ = ["trace_rays", "load_bathymetry"]
 __version__ = "0.1.0"
