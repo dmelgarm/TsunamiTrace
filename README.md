@@ -54,7 +54,8 @@ TsunamiTrace/
 │   ├── io.py              # load_bathymetry(): bathymetry file loaders
 │   └── analysis.py        # grid_travel_times(): post-processing of ray output
 ├── data/
-│   └── cascadia.xyz       # GEBCO-derived 30 arc-second bathymetry (Git LFS)
+│   ├── cascadia.xyz            # GEBCO 30 arc-second bathymetry, Cascadia (Git LFS)
+│   └── NE_pacific_4arcmin.nc  # GEBCO 4 arc-minute bathymetry, NE Pacific / Alaska
 ├── examples/
 │   ├── ridge_refraction.ipynb     # Ray refraction across a synthetic submarine ridge
 │   └── cascadia_travel_times.ipynb  # Regional travel times for a Cascadia megathrust scenario
@@ -93,16 +94,25 @@ pip install -e ".[dev]"
 
 ### Loading bathymetry
 
+The format is detected automatically from the file extension.
+
 ```python
 import TsunamiTrace as tt
 
-# Load a three-column lon/lat/depth ASCII file.
-# negate=True (default) converts from the standard geographic convention
-# (negative = ocean) to the TsunamiTrace convention (positive = ocean).
+# Three-column ASCII (.xyz, .txt, …)
 lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.xyz')
 
-# If your file already stores ocean depth as positive, pass negate=False:
-lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.xyz', negate=False)
+# NetCDF (.nc, .nc4) — depth variable auto-detected from common names
+# (z, elevation, topo, depth, Band1, …)
+lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.nc')
+
+# NetCDF with an unusual variable name — specify it explicitly
+lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.nc', depth_var='sea_floor_depth')
+
+# negate=True (default) converts from the standard geographic convention
+# (ocean negative) to the TsunamiTrace convention (ocean positive).
+# Pass negate=False if your file already stores ocean depth as positive.
+lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.nc', negate=False)
 
 # depth shape is (n_lon, n_lat), ready for trace_rays.
 # For matplotlib contour plots transpose to row-major (n_lat, n_lon):
@@ -177,7 +187,7 @@ The test suite has 14 tests across two files:
 
 `examples/cascadia_travel_times.ipynb`: Real-bathymetry example using a GEBCO-derived 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 36,000 rays from a source on the locked zone of the megathrust (47.86°N, 124.91°W) and produces a first-arrival travel time map for the Pacific Northwest coast using `tt.grid_travel_times`. Requires `scipy` (`pip install -e ".[examples]"`).
 
-The bathymetry file (`data/cascadia.xyz`) is stored in Git LFS. After cloning, run `git lfs pull` if the file is not automatically retrieved.
+`data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. `data/NE_pacific_4arcmin.nc` is small enough (2.9 MB) to be committed directly.
 
 To run the examples:
 
@@ -209,6 +219,7 @@ Scaling with ray count is much flatter than a sequential loop because the per-ra
 | Python 3.9+ | core requirement |
 | NumPy | core ray tracing |
 | Matplotlib | core requirement |
-| pandas | `load_bathymetry()` (optional; falls back to `numpy.loadtxt` if absent) |
+| pandas | `load_bathymetry()` ASCII path (optional; falls back to `numpy.loadtxt` if absent) |
+| netCDF4 | `load_bathymetry()` NetCDF path (`pip install -e ".[examples]"`) |
 | scipy | `grid_travel_times()` and examples |
 | pytest | tests (`pip install -e ".[dev]"`) |
