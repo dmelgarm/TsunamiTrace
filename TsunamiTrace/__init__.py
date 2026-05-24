@@ -24,6 +24,8 @@ https://doi.org/10.1007/s00024-017-1590-2
 from .raytracing import trace_rays
 from . import io
 from .io import load_bathymetry
+from . import analysis
+from .analysis import grid_travel_times
 
-__all__ = ["trace_rays", "load_bathymetry"]
+__all__ = ["trace_rays", "load_bathymetry", "grid_travel_times"]
 __version__ = "0.1.0"
