@@ -4,7 +4,7 @@ Python package for tsunami ray tracing on a sphere using 4th-order Runge-Kutta i
 
 ## Applications
 
-The most common use of TsunamiTrace is computing **first-arrival travel time maps**: grids that show how many minutes or hours after a submarine earthquake a tsunami would reach any point in the ocean.  These maps underpin two broad classes of work:
+The most common use of TsunamiTrace is computing **first-arrival travel time maps**: grids that show how many minutes or hours after a geophysical source (earthquake, volcanic eruption, or submarine landslide) a tsunami would reach any point in the ocean.  These maps underpin two broad classes of work:
 
 **Hazard and emergency response**
 - Estimating evacuation lead times for coastal communities
