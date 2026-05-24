@@ -221,6 +221,76 @@ def test_snell_law_lat_gradient(lat_gradient_ocean):
     )
 
 
+def test_multi_source_output_shape(flat_ocean):
+    """
+    Passing array sources must return shape (n_sources, n_azimuths, n_steps),
+    while a scalar source must still return (n_azimuths, n_steps).
+    """
+    f          = flat_ocean
+    N_SOURCES  = 3
+    N_AZIMUTHS = 6
+    MAX_TIME   = 300.0
+
+    src_lons = np.array([154.0, 157.0, 160.0])
+    src_lats = np.array([-3.0,    0.0,   3.0])
+    azimuths = np.linspace(0, 300, N_AZIMUTHS)
+
+    ray_lon, ray_lat, ray_dir = tt.trace_rays(
+        f['lon_arr'], f['lat_arr'], f['depth'],
+        DT, MAX_TIME, src_lons, src_lats, azimuths,
+    )
+
+    n_steps = len(np.arange(0.0, MAX_TIME + DT, DT)) + 1
+    assert ray_lon.shape == (N_SOURCES, N_AZIMUTHS, n_steps), (
+        f"Expected (n_sources={N_SOURCES}, n_azimuths={N_AZIMUTHS}, n_steps={n_steps}), "
+        f"got {ray_lon.shape}"
+    )
+    assert ray_lat.shape == (N_SOURCES, N_AZIMUTHS, n_steps)
+    assert ray_dir.shape == (N_SOURCES, N_AZIMUTHS, n_steps)
+
+    # Scalar source must still return 2-D arrays (backward compatible)
+    rl, rla, rd = tt.trace_rays(
+        f['lon_arr'], f['lat_arr'], f['depth'],
+        DT, MAX_TIME, f['source_lon'], f['source_lat'], azimuths,
+    )
+    assert rl.shape == (N_AZIMUTHS, n_steps), (
+        f"Scalar source should return (n_azimuths, n_steps), got {rl.shape}"
+    )
+
+
+def test_multi_source_matches_single(flat_ocean):
+    """
+    Each source slice of a multi-source call must exactly match the result of
+    an individual single-source call with the same parameters.
+    """
+    f = flat_ocean
+    src_lons = np.array([154.0, 157.0, 160.0])
+    src_lats = np.array([-3.0,    0.0,   3.0])
+    azimuths = np.arange(0, 360, 45, dtype=float)
+    MAX_TIME = 600.0
+
+    # Multi-source call — one vectorised pass for all three sources
+    ray_lon_m, ray_lat_m, ray_dir_m = tt.trace_rays(
+        f['lon_arr'], f['lat_arr'], f['depth'],
+        DT, MAX_TIME, src_lons, src_lats, azimuths,
+    )
+
+    # Individual single-source calls
+    for i, (slon, slat) in enumerate(zip(src_lons, src_lats)):
+        ray_lon_s, ray_lat_s, ray_dir_s = tt.trace_rays(
+            f['lon_arr'], f['lat_arr'], f['depth'],
+            DT, MAX_TIME, slon, slat, azimuths,
+        )
+        np.testing.assert_array_equal(
+            ray_lon_m[i], ray_lon_s,
+            err_msg=f"Source {i}: multi-source lon slice does not match single-source call",
+        )
+        np.testing.assert_array_equal(
+            ray_lat_m[i], ray_lat_s,
+            err_msg=f"Source {i}: multi-source lat slice does not match single-source call",
+        )
+
+
 def test_ridge_slows_westward_ray(ridge):
     """
     A westward ray crossing the submarine ridge must travel less distance by

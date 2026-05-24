@@ -46,18 +46,21 @@ def flat_ocean():
     lat_arr = np.arange(-10.0, 10.0 + GRID_SPACING_DEG, GRID_SPACING_DEG)
     n_lon, n_lat = len(lon_arr), len(lat_arr)
 
+    colat_arr = 90.0 - lat_arr   # decreasing (100° … 80°) for ascending lat
+
     return dict(
-        n_lon         = n_lon,
-        n_lat         = n_lat,
-        slowness_grid = np.full((n_lon, n_lat), SLOWNESS),
-        depth_grid    = np.full((n_lon, n_lat), DEPTH),
-        grad_phi      = np.zeros((n_lon - 1, n_lat)),
-        grad_colat    = np.zeros((n_lon, n_lat - 1)),
-        dphi_rad      = GRID_SPACING_DEG * DEG_TO_RAD,
-        dcolat_rad    = GRID_SPACING_DEG * DEG_TO_RAD,
-        time_arr      = np.arange(0.0, MAX_TIME + DT, DT),
-        source_ix     = int(np.argmin(np.abs(lon_arr - SOURCE_LON))),
-        source_iy     = int(np.argmin(np.abs(lat_arr - SOURCE_LAT))),
+        n_lon            = n_lon,
+        n_lat            = n_lat,
+        slowness_grid    = np.full((n_lon, n_lat), SLOWNESS),
+        depth_grid       = np.full((n_lon, n_lat), DEPTH),
+        grad_phi         = np.zeros((n_lon - 1, n_lat)),
+        grad_colat       = np.zeros((n_lon, n_lat - 1)),
+        dphi_rad         = abs(lon_arr[1] - lon_arr[0]) * DEG_TO_RAD,
+        # dcolat_rad is SIGNED: ascending lat → decreasing colatitude
+        dcolat_rad       = (colat_arr[1] - colat_arr[0]) * DEG_TO_RAD,
+        time_arr         = np.arange(0.0, MAX_TIME + DT, DT),
+        phi_grid_start   = lon_arr[0]  * DEG_TO_RAD,
+        theta_grid_start = (90.0 - lat_arr[0]) * DEG_TO_RAD,
     )
 
 
@@ -65,11 +68,16 @@ def flat_ocean():
 def _run_ray(grid, azimuth):
     """Run _integrate_rays for a single azimuth; return non-NaN 1-D arrays."""
     g = grid
+    phi0   = np.array([SOURCE_LON * DEG_TO_RAD])
+    theta0 = np.array([(90.0 - SOURCE_LAT) * DEG_TO_RAD])
+    dir0   = np.array([((180.0 - azimuth) % 360.0) * DEG_TO_RAD])
+
     out_phi, out_theta, out_ray_dir = _integrate_rays(
         g['time_arr'], DT, g['dphi_rad'], g['dcolat_rad'],
         g['slowness_grid'], g['grad_phi'], g['grad_colat'],
-        np.array([azimuth], dtype=float), SOURCE_LON, SOURCE_LAT,
-        g['source_ix'], g['source_iy'], g['n_lon'], g['n_lat'], g['depth_grid'],
+        phi0, theta0, dir0,
+        g['phi_grid_start'], g['theta_grid_start'],
+        g['n_lon'], g['n_lat'], g['depth_grid'],
     )
     # Squeeze the ray dimension and strip trailing NaNs
     phi_ray = out_phi[0]

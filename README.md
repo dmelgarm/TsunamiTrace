@@ -49,13 +49,13 @@ https://github.com/adityagusman/tsunami-raytracing
 TsunamiTrace/
 ├── TsunamiTrace/
 │   ├── __init__.py        # Public API: trace_rays(), load_bathymetry(), grid_travel_times()
-│   ├── raytracing.py      # trace_rays(): builds slowness field, fans rays
+│   ├── raytracing.py      # trace_rays(): builds slowness field, fans rays from one or more sources
 │   ├── _rungekutta.py     # _integrate_rays(): vectorised RK4 integrator for all rays
 │   ├── io.py              # load_bathymetry(): bathymetry file loaders
 │   └── analysis.py        # grid_travel_times(): post-processing of ray output
 ├── data/
-│   ├── cascadia.xyz            # GEBCO 30 arc-second bathymetry, Cascadia (Git LFS)
-│   └── NE_pacific_4arcmin.nc  # GEBCO 4 arc-minute bathymetry, NE Pacific / Alaska
+│   ├── cascadia.xyz            # SRTM30+ 30 arc-second bathymetry, Cascadia (Git LFS)
+│   └── NE_pacific_4arcmin.nc  # ETOPO2 4 arc-minute bathymetry, NE Pacific / Alaska
 ├── examples/
 │   ├── ridge_refraction.ipynb              # Ray refraction across a synthetic submarine ridge
 │   ├── cascadia_travel_times.ipynb         # Regional travel times for a Cascadia megathrust scenario
@@ -128,6 +128,7 @@ import TsunamiTrace as tt
 
 lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.xyz')
 
+# Single point source — returns shape (n_azimuths, n_steps)
 ray_lon, ray_lat, ray_dir = tt.trace_rays(
     lon_arr,      # 1-D array of longitudes (degrees)
     lat_arr,      # 1-D array of latitudes (degrees)
@@ -138,7 +139,23 @@ ray_lon, ray_lat, ray_dir = tt.trace_rays(
     source_lat=0.0,
     azimuths_deg=np.arange(0, 360, 2),
 )
-# ray_lon, ray_lat, ray_dir: shape (n_rays, n_steps), NaN-padded after boundary exit
+# ray_lon, ray_lat, ray_dir: shape (n_azimuths, n_steps), NaN-padded after boundary exit
+
+# Finite fault / multi-source — returns shape (n_sources, n_azimuths, n_steps)
+src_lons = np.array([155.0, 157.0, 159.0])   # sub-fault centroids
+src_lats = np.array([-1.0,   0.0,   1.0])
+
+ray_lon, ray_lat, ray_dir = tt.trace_rays(
+    lon_arr, lat_arr, depth,
+    dt=30, max_time=7200,
+    source_lon=src_lons,
+    source_lat=src_lats,
+    azimuths_deg=np.arange(0, 360, 2),
+)
+# All sources and azimuths are integrated in a single vectorised RK4 pass.
+# Pass the (n_sources, n_azimuths, n_steps) arrays directly to grid_travel_times —
+# it flattens them internally and keeps the minimum travel time per cell across
+# all sources, giving a true first-arrival map for the entire finite fault.
 ```
 
 ### Travel time map
@@ -175,20 +192,20 @@ Or with verbose output:
 pytest -v
 ```
 
-The test suite has 14 tests across two files:
+The test suite has 16 tests across two files:
 
 | File | Tests |
 |------|-------|
 | `tests/test_rk4.py` | RK4 integrator unit tests: great-circle accuracy across 5 azimuths, zero longitude drift for due-north ray, zero latitude drift for due-east equatorial ray, arc-length error < 1 m over 1 hour |
-| `tests/test_trace_rays.py` | Integration tests: output shape, invalid-depth-shape error, NaN consistency, meridional symmetry, Snell's law slowdown across a submarine ridge, Snell's law refraction direction on a north-deepening gradient |
+| `tests/test_trace_rays.py` | Integration tests: output shape (scalar and array sources), invalid-depth-shape error, NaN consistency, meridional symmetry, Snell's law slowdown across a submarine ridge, Snell's law refraction direction on a north-deepening gradient, multi-source output shape, multi-source results match individual single-source calls |
 
 ## Examples
 
 `examples/ridge_refraction.ipynb`: Jupyter notebook demonstrating ray refraction across a synthetic N-S submarine ridge. A Gaussian ridge sits between the source and the western edge of the domain; the shallow ridge crest slows the wave from ~221 m/s (deep ocean) to ~63 m/s (ridge crest), bending rays toward the normal to the isobaths.
 
-`examples/cascadia_travel_times.ipynb`: Real-bathymetry example using a GEBCO-derived 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 36,000 rays from a source on the locked zone of the megathrust (47.86°N, 124.91°W) and produces a first-arrival travel time map for the Pacific Northwest coast using `tt.grid_travel_times`. Requires `scipy` (`pip install -e ".[examples]"`).
+`examples/cascadia_travel_times.ipynb`: Real-bathymetry example using an SRTM30+ 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 36,000 rays from a source on the locked zone of the megathrust (47.86°N, 124.91°W) and produces a first-arrival travel time map for the Pacific Northwest coast using `tt.grid_travel_times`. Requires `scipy` (`pip install -e ".[examples]"`).
 
-`examples/alaska_point_vs_finite_fault.ipynb`: Trans-oceanic travel time example using a GEBCO-derived 4 arc-minute NetCDF grid of the NE Pacific. Models the 1964 Alaska earthquake source (nudged offshore to 60.07°N, 146.68°W) and integrates 360,000 rays for 12 hours to capture trans-oceanic propagation. Compares point-source and finite-fault approaches. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
+`examples/alaska_point_vs_finite_fault.ipynb`: Trans-oceanic travel time example using an ETOPO2 4 arc-minute NetCDF grid of the NE Pacific. Models the 1964 Alaska earthquake source (nudged offshore to 60.07°N, 146.68°W) and integrates 360,000 rays for 12 hours to capture trans-oceanic propagation. Compares point-source and finite-fault approaches. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
 
 `data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. `data/NE_pacific_4arcmin.nc` is small enough (2.9 MB) to be committed directly.
 
