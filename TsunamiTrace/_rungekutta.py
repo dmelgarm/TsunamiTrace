@@ -44,14 +44,18 @@ def _ddir(theta, ray_dir, n, dn_dcolat, dn_dphi, R):
 
 def _integrate_rays(time_arr, dt, dphi_rad, dcolat_rad,
                     slowness, slowness_grad_phi, slowness_grad_colat,
-                    azimuths_deg, source_lon, source_lat,
-                    source_ix, source_iy, n_lon, n_lat, depth):
+                    phi0_arr, theta0_arr, ray_dir0_arr,
+                    phi_grid_start, theta_grid_start,
+                    n_lon, n_lat, depth):
     """
     Integrate all tsunami rays simultaneously using vectorised RK4.
 
     All rays share the same bathymetry grid and are advanced together at each
     time step.  A boolean mask eliminates terminated rays from further
     computation without padding their output arrays.
+
+    Initial conditions are passed in as pre-built arrays, making this function
+    agnostic to whether the rays originate from one source or many.
 
     Parameters
     ----------
@@ -60,21 +64,27 @@ def _integrate_rays(time_arr, dt, dphi_rad, dcolat_rad,
     dt : float
         Time step in seconds.
     dphi_rad : float
-        Grid spacing in the longitude (phi) direction, radians.
+        Grid spacing in the longitude (phi) direction, radians. Always positive.
     dcolat_rad : float
-        Grid spacing in the colatitude (theta) direction, radians.
+        Signed grid spacing in the colatitude (theta) direction, radians.
+        Negative when lat_arr is ascending (the standard convention), because
+        colatitude decreases as the lat index increases.
     slowness : ndarray, shape (n_lon, n_lat)
         Slowness 1/sqrt(g*depth) in s/m.  Land cells pre-set to >= 1.
     slowness_grad_phi : ndarray, shape (n_lon-1, n_lat)
-        dn/dphi in s/(m·rad), from np.diff(slowness, axis=0) / dphi_rad.
+        dn/dphi in s/(m*rad).
     slowness_grad_colat : ndarray, shape (n_lon, n_lat-1)
-        dn/dtheta in s/(m·rad), from np.diff(slowness, axis=1) / dcolat_rad.
-    azimuths_deg : array_like, shape (n_rays,)
-        Initial ray azimuths in degrees (0=N, 90=E, 180=S, 270=W).
-    source_lon, source_lat : float
-        Source position in degrees.
-    source_ix, source_iy : int
-        Nearest grid indices to the source.
+        dn/dtheta in s/(m*rad).
+    phi0_arr : ndarray, shape (n_rays,)
+        Initial longitude of every ray in radians.
+    theta0_arr : ndarray, shape (n_rays,)
+        Initial colatitude of every ray in radians.
+    ray_dir0_arr : ndarray, shape (n_rays,)
+        Initial ODE ray direction of every ray in radians.
+    phi_grid_start : float
+        Longitude of grid index 0 in radians (lon_arr[0] * DEG_TO_RAD).
+    theta_grid_start : float
+        Colatitude of grid index 0 in radians ((90 - lat_arr[0]) * DEG_TO_RAD).
     n_lon, n_lat : int
         Grid dimensions.
     depth : ndarray, shape (n_lon, n_lat)
@@ -88,28 +98,9 @@ def _integrate_rays(time_arr, dt, dphi_rad, dcolat_rad,
         Ray colatitude in radians.  NaN after termination.
     out_ray_dir : ndarray, shape (n_rays, n_steps)
         Ray direction in radians.  NaN after termination.
-
-    Notes
-    -----
-    Equations of motion — Snell's law on a sphere:
-
-        dtheta/dt   = cos(ray_dir) / (n * R)
-        dphi/dt     = sin(ray_dir) / (n * R * sin(theta))
-        dray_dir/dt = -sin(ray_dir) * dn/dtheta / (n^2 * R)
-                      + cos(ray_dir) * dn/dphi   / (n^2 * R * sin(theta))
-                      - sin(ray_dir) * cos(theta) / (n * R * sin(theta))
-
-    Termination fires when any of these conditions holds for a given ray:
-      1. Grid boundary: lon_idx outside [0, n_lon-2] or lat_idx outside [0, n_lat-2].
-      2. Shallow water or land: depth < 10 m.
-      3. Land sentinel: n_here >= 1.
-
-    Slowness and its gradients are frozen at the grid cell corresponding to
-    the ray's position at the start of each time step and held constant
-    through all four RK stages (piecewise-constant medium per cell).
     """
     R      = _EARTH_RADIUS
-    n_rays = len(azimuths_deg)
+    n_rays  = len(phi0_arr)
     n_steps = len(time_arr) + 1
 
     # Pre-allocate output arrays — NaN marks positions after termination
@@ -117,15 +108,9 @@ def _integrate_rays(time_arr, dt, dphi_rad, dcolat_rad,
     out_theta   = np.full((n_rays, n_steps), np.nan)
     out_ray_dir = np.full((n_rays, n_steps), np.nan)
 
-    # Initial conditions — all rays start from the same source point
-    phi0   = source_lon * _DEG_TO_RAD
-    theta0 = (90.0 - source_lat) * _DEG_TO_RAD
-
-    phi     = np.full(n_rays, phi0)
-    theta   = np.full(n_rays, theta0)
-    # Convert geographic azimuth (CW from N) to ODE angle (CCW from +e_theta):
-    # z = pi - azimuth  →  z=0 points south, z=pi points north
-    ray_dir = (180.0 - np.asarray(azimuths_deg, dtype=float)) * _DEG_TO_RAD
+    phi     = phi0_arr.copy()
+    theta   = theta0_arr.copy()
+    ray_dir = ray_dir0_arr.copy()
 
     out_phi[:, 0]     = phi
     out_theta[:, 0]   = theta
@@ -137,9 +122,10 @@ def _integrate_rays(time_arr, dt, dphi_rad, dcolat_rad,
         if not alive.any():
             break
 
-        # Snap current position to nearest grid cell
-        lon_idx = source_ix + np.round((phi   - phi0)   / dphi_rad).astype(int)
-        lat_idx = source_iy + np.round((theta - theta0) / dcolat_rad).astype(int)
+        # Absolute grid-cell index from current ray position.
+        # dphi_rad > 0 always; dcolat_rad < 0 for ascending lat_arr.
+        lon_idx = np.round((phi   - phi_grid_start)   / dphi_rad).astype(int)
+        lat_idx = np.round((theta - theta_grid_start) / dcolat_rad).astype(int)
 
         # Clip to valid index ranges before array access —
         # dead rays may have wandered outside the grid.
