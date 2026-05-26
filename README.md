@@ -57,9 +57,9 @@ TsunamiTrace/
 │   ├── cascadia.xyz            # SRTM30+ 30 arc-second bathymetry, Cascadia (Git LFS)
 │   └── NE_pacific_4arcmin.nc  # ETOPO2 4 arc-minute bathymetry, NE Pacific / Alaska
 ├── examples/
-│   ├── ridge_refraction.ipynb              # Ray refraction across a synthetic submarine ridge
-│   ├── cascadia_travel_times.ipynb         # Regional travel times for a Cascadia megathrust scenario
-│   └── alaska_point_vs_finite_fault.ipynb  # Point source vs finite fault, 1964 Alaska earthquake
+│   ├── 01_ridge_refraction.ipynb              # Ray refraction across a synthetic submarine ridge
+│   ├── 02_cascadia_travel_times.ipynb         # Regional travel times for a Cascadia megathrust scenario
+│   └── 03_alaska_point_vs_finite_fault.ipynb  # Point source vs finite fault, 1964 Alaska earthquake
 ├── tests/
 │   ├── test_rk4.py        # Unit tests for the RK4 integrator (great-circle accuracy)
 │   └── test_trace_rays.py # Integration tests for trace_rays() (shape, symmetry, Snell's law)
@@ -223,11 +223,11 @@ The test suite has 16 tests across two files:
 
 ## Examples
 
-`examples/ridge_refraction.ipynb`: Jupyter notebook demonstrating ray refraction across a synthetic N-S submarine ridge. A Gaussian ridge sits between the source and the western edge of the domain; the shallow ridge crest slows the wave from ~221 m/s (deep ocean) to ~63 m/s (ridge crest), bending rays toward the normal to the isobaths.
+`examples/01_ridge_refraction.ipynb`: Jupyter notebook demonstrating ray refraction across a synthetic N-S submarine ridge. A Gaussian ridge sits between the source and the western edge of the domain; the shallow ridge crest slows the wave from ~221 m/s (deep ocean) to ~63 m/s (ridge crest), bending rays toward the normal to the isobaths.
 
-`examples/cascadia_travel_times.ipynb`: Real-bathymetry example using an SRTM30+ 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 360,000 rays from a source on the locked zone of the megathrust (47.65°N, 125.50°W) and produces several diagnostic and final maps: a filled first-arrival travel time map (`fill=True`), a raw ray-coverage map with NaN cells rendered in grey (`fill=False`), a combined travel-time-plus-rays overlay, and an azimuth map (`tt.grid_azimuths`) with the travel-time contours to identify which source azimuths have sparse ray coverage. Requires `scipy` (`pip install -e ".[examples]"`).
+`examples/02_cascadia_travel_times.ipynb`: Real-bathymetry example using an SRTM30+ 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 360,000 rays from a source on the locked zone of the megathrust (47.65°N, 125.50°W) and produces several diagnostic and final maps: a filled first-arrival travel time map (`fill=True`), a raw ray-coverage map with NaN cells rendered in grey (`fill=False`), a combined travel-time-plus-rays overlay, and an azimuth map (`tt.grid_azimuths`) with the travel-time contours to identify which source azimuths have sparse ray coverage. Requires `scipy` (`pip install -e ".[examples]"`).
 
-`examples/alaska_point_vs_finite_fault.ipynb`: Trans-oceanic travel time example using an ETOPO2 4 arc-minute NetCDF grid of the NE Pacific. Models the 1964 Alaska earthquake source (nudged offshore to 60.07°N, 146.68°W) and integrates 360,000 rays for 12 hours to capture trans-oceanic propagation. Compares point-source and finite-fault approaches. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
+`examples/03_alaska_point_vs_finite_fault.ipynb`: Trans-oceanic travel time example using an ETOPO2 4 arc-minute NetCDF grid of the NE Pacific. Models the 1964 Alaska earthquake source (nudged offshore to 60.07°N, 146.68°W) and integrates 360,000 rays for 12 hours to capture trans-oceanic propagation. Compares point-source and finite-fault approaches. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
 
 `data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. `data/NE_pacific_4arcmin.nc` is small enough (2.9 MB) to be committed directly.
 
@@ -235,9 +235,9 @@ To run the examples:
 
 ```bash
 conda activate tsunamitrace
-jupyter notebook examples/ridge_refraction.ipynb
-jupyter notebook examples/cascadia_travel_times.ipynb
-jupyter notebook examples/alaska_point_vs_finite_fault.ipynb
+jupyter notebook examples/01_ridge_refraction.ipynb
+jupyter notebook examples/02_cascadia_travel_times.ipynb
+jupyter notebook examples/03_alaska_point_vs_finite_fault.ipynb
 ```
 
 ## Performance
