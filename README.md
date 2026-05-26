@@ -55,7 +55,12 @@ TsunamiTrace/
 │   └── analysis.py        # grid_travel_times(), grid_azimuths(): post-processing of ray output
 ├── data/
 │   ├── cascadia.xyz            # SRTM30+ 30 arc-second bathymetry, Cascadia (Git LFS)
-│   └── NE_pacific_4arcmin.nc  # ETOPO2 4 arc-minute bathymetry, NE Pacific / Alaska
+│   ├── NE_pacific_4arcmin.nc  # ETOPO2 4 arc-minute bathymetry, NE Pacific / Alaska
+│   ├── CSZ_trench.txt          # CSZ trench axis polyline (plotting reference)
+│   ├── CSZ_max_def.txt         # CSZ max-deformation path (source line for notebook 05)
+│   ├── CSZ_US_coast.txt        # Pacific coast receiver points, N. California → Washington
+│   ├── CSZ_CA_coast.txt        # Pacific coast receiver points, British Columbia
+│   └── 1964_slip_region.txt    # 1964 Alaska earthquake rupture polygon (notebook 03)
 ├── examples/
 │   ├── 01_ridge_refraction.ipynb              # Ray refraction across a synthetic submarine ridge
 │   ├── 02_cascadia_travel_times.ipynb         # Regional travel times for a Cascadia megathrust scenario
@@ -235,7 +240,7 @@ The test suite has 16 tests across two files:
 
 `examples/05_CSZ_coastal_arrival_times.ipynb`: Near-field CSZ scenario addressing the question "how many minutes after the shaking does the first wave arrive?". Distributes 150 sources along the `CSZ_max_def` path (the zone of maximum seafloor deformation, between the trench and coast), traces 54,000 rays simultaneously, and grids the minimum first-arrival time across all sources. Samples the result at 200 US coast points (northern California → Washington) and 150 Canadian coast points (British Columbia) and displays them as a scatter plot coloured by arrival time overlaid on the regional travel time map. Requires `scipy` (`pip install -e ".[examples]"`).
 
-`data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. `data/NE_pacific_4arcmin.nc` is small enough (2.9 MB) to be committed directly.
+`data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. All other data files (`NE_pacific_4arcmin.nc`, `CSZ_*.txt`, `1964_slip_region.txt`) are small enough to be committed directly.
 
 To run the examples:
 
