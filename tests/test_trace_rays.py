@@ -291,6 +291,128 @@ def test_multi_source_matches_single(flat_ocean):
         )
 
 
+def test_dispersive_multiple_params_raises(flat_ocean):
+    """Passing more than one wave parameter must raise ValueError."""
+    f = flat_ocean
+    with pytest.raises(ValueError, match="at most one"):
+        tt.trace_rays(
+            f['lon_arr'], f['lat_arr'], f['depth'],
+            DT, 300.0, f['source_lon'], f['source_lat'], [0.0],
+            period=1800.0, frequency=1/1800.0,
+        )
+
+
+def test_dispersive_shallow_water_limit(flat_ocean):
+    """
+    For a very long period (T = 6 hours, kh << 1 in 4000 m water),
+    the dispersive group speed must be within 0.1% of sqrt(g*h).
+
+    At kh → 0: tanh(kh) → kh, so c_phase → sqrt(g*h), and the bracket
+    factor → 2, giving c_group → c_phase = sqrt(g*h).
+    """
+    from TsunamiTrace.raytracing import _dispersive_group_speed
+    h     = 4000.0
+    omega = 2.0 * np.pi / (6 * 3600.0)   # T = 6 h
+    depth = np.array([[h]])
+    c_sw  = np.sqrt(9.8 * h)
+    c_g   = _dispersive_group_speed(depth, omega)[0, 0]
+    assert abs(c_g - c_sw) / c_sw < 1e-3, (
+        f"6-hour wave in 4000 m: dispersive c_group={c_g:.4f} m/s, "
+        f"shallow-water={c_sw:.4f} m/s, relative error={abs(c_g-c_sw)/c_sw:.2e}"
+    )
+
+
+def test_dispersive_deep_water_limit():
+    """
+    For kh >> 1, c_group must approach sqrt(g/k)/2 (deep-water limit).
+
+    Use a very short wavelength (λ = 10 m) in very deep water (h = 5000 m),
+    giving kh ≈ 3142.  The bracket factor → 1, so c_group → c_phase/2.
+    """
+    from TsunamiTrace.raytracing import _dispersive_group_speed
+    lam   = 10.0                          # 10 m wavelength
+    k     = 2.0 * np.pi / lam
+    omega = np.sqrt(9.8 * k)             # deep-water dispersion relation
+    h     = 5000.0
+    depth = np.array([[h]])
+    c_deep = np.sqrt(9.8 / k) / 2.0      # expected deep-water group speed
+    c_g    = _dispersive_group_speed(depth, omega)[0, 0]
+    assert abs(c_g - c_deep) / c_deep < 1e-4, (
+        f"λ=10 m in 5000 m water: c_group={c_g:.6f} m/s, "
+        f"expected={c_deep:.6f} m/s, rel error={abs(c_g-c_deep)/c_deep:.2e}"
+    )
+
+
+def test_dispersive_slower_than_shallow_water(flat_ocean):
+    """
+    For any finite period the dispersive group speed must be ≤ sqrt(g*h).
+
+    This follows from the exact dispersion relation: tanh(kh) < kh for all
+    kh > 0, so the dispersive phase speed is always less than the shallow-
+    water speed, and c_group ≤ c_phase.
+    """
+    from TsunamiTrace.raytracing import _dispersive_group_speed
+    h     = flat_ocean['depth'][0, 0]
+    c_sw  = np.sqrt(9.8 * h)
+    for T in [120.0, 300.0, 600.0, 1800.0]:   # 2 min, 5 min, 10 min, 30 min
+        omega = 2.0 * np.pi / T
+        c_g   = _dispersive_group_speed(flat_ocean['depth'][:1, :1], omega)[0, 0]
+        assert c_g <= c_sw + 1e-6, (
+            f"T={T:.0f} s: dispersive c_group={c_g:.4f} > sqrt(gh)={c_sw:.4f}"
+        )
+
+
+def test_dispersive_period_frequency_wavelength_consistent(flat_ocean):
+    """
+    period=T, frequency=1/T, and wavelength derived from the same ω must
+    all produce the same travel time grid.
+
+    The wavelength input converts via the deep-water dispersion relation
+    ω = sqrt(g·k), so the matching λ is sqrt(g) * 2π / ω² = g·T²/(2π).
+    """
+    f        = flat_ocean
+    T        = 300.0
+    omega    = 2.0 * np.pi / T
+    k_deep   = omega**2 / 9.8
+    lam      = 2.0 * np.pi / k_deep
+
+    kw = dict(lon_arr=f['lon_arr'], lat_arr=f['lat_arr'], depth=f['depth'],
+              dt=DT, max_time=300.0,
+              source_lon=f['source_lon'], source_lat=f['source_lat'],
+              azimuths_deg=np.array([0.0, 90.0, 180.0, 270.0]))
+
+    rl_p, _, _ = tt.trace_rays(**kw, period=T)
+    rl_f, _, _ = tt.trace_rays(**kw, frequency=1.0/T)
+    rl_w, _, _ = tt.trace_rays(**kw, wavelength=lam)
+
+    np.testing.assert_array_equal(rl_p, rl_f,
+        err_msg="period and frequency inputs give different ray paths")
+    np.testing.assert_array_equal(rl_p, rl_w,
+        err_msg="period and wavelength inputs give different ray paths")
+
+
+def test_dispersive_output_shape_unchanged(flat_ocean):
+    """Dispersive trace_rays must return the same array shapes as non-dispersive."""
+    f        = flat_ocean
+    N_RAYS   = 4
+    MAX_TIME = 300.0
+    azimuths = np.linspace(0, 270, N_RAYS)
+    n_steps  = len(np.arange(0.0, MAX_TIME + DT, DT)) + 1
+
+    rl_nd, _, _ = tt.trace_rays(
+        f['lon_arr'], f['lat_arr'], f['depth'],
+        DT, MAX_TIME, f['source_lon'], f['source_lat'], azimuths,
+    )
+    rl_d, _, _ = tt.trace_rays(
+        f['lon_arr'], f['lat_arr'], f['depth'],
+        DT, MAX_TIME, f['source_lon'], f['source_lat'], azimuths,
+        period=1800.0,
+    )
+    assert rl_nd.shape == rl_d.shape == (N_RAYS, n_steps), (
+        f"Shape mismatch: non-dispersive={rl_nd.shape}, dispersive={rl_d.shape}"
+    )
+
+
 def test_ridge_slows_westward_ray(ridge):
     """
     A westward ray crossing the submarine ridge must travel less distance by
