@@ -60,7 +60,8 @@ TsunamiTrace/
 │   ├── 01_ridge_refraction.ipynb              # Ray refraction across a synthetic submarine ridge
 │   ├── 02_cascadia_travel_times.ipynb         # Regional travel times for a Cascadia megathrust scenario
 │   ├── 03_alaska_point_vs_finite_fault.ipynb  # Point source vs finite fault, 1964 Alaska earthquake
-│   └── 04_DART_arrival_times.ipynb            # Predicted DART arrival times, 2021 Chignik M8.2
+│   ├── 04_DART_arrival_times.ipynb            # Predicted DART arrival times, 2021 Chignik M8.2
+│   └── 05_CSZ_coastal_arrival_times.ipynb    # Minimum tsunami arrival times at the US/BC coast, CSZ
 ├── tests/
 │   ├── test_rk4.py        # Unit tests for the RK4 integrator (great-circle accuracy)
 │   └── test_trace_rays.py # Integration tests for trace_rays() (shape, symmetry, Snell's law)
@@ -232,6 +233,8 @@ The test suite has 16 tests across two files:
 
 `examples/04_DART_arrival_times.ipynb`: Regional travel time example for the 2021 Chignik M8.2 earthquake (55.36°N, 157.89°W) in the Gulf of Alaska. Traces 360 rays for 3 hours and produces a first-arrival travel time map for the Gulf of Alaska, then samples predicted arrival times at three nearby DART buoys (46414, 46409, 46410) and annotates them on the map. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
 
+`examples/05_CSZ_coastal_arrival_times.ipynb`: Near-field CSZ scenario addressing the question "how many minutes after the shaking does the first wave arrive?". Distributes 150 sources along the `CSZ_max_def` path (the zone of maximum seafloor deformation, between the trench and coast), traces 54,000 rays simultaneously, and grids the minimum first-arrival time across all sources. Samples the result at 200 US coast points (northern California → Washington) and 150 Canadian coast points (British Columbia) and displays them as a scatter plot coloured by arrival time overlaid on the regional travel time map. Requires `scipy` (`pip install -e ".[examples]"`).
+
 `data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. `data/NE_pacific_4arcmin.nc` is small enough (2.9 MB) to be committed directly.
 
 To run the examples:
@@ -242,6 +245,7 @@ jupyter notebook examples/01_ridge_refraction.ipynb
 jupyter notebook examples/02_cascadia_travel_times.ipynb
 jupyter notebook examples/03_alaska_point_vs_finite_fault.ipynb
 jupyter notebook examples/04_DART_arrival_times.ipynb
+jupyter notebook examples/05_CSZ_coastal_arrival_times.ipynb
 ```
 
 ## Performance
