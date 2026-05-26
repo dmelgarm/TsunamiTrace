@@ -66,7 +66,8 @@ TsunamiTrace/
 │   ├── 02_cascadia_travel_times.ipynb         # Regional travel times for a Cascadia megathrust scenario
 │   ├── 03_alaska_point_vs_finite_fault.ipynb  # Point source vs finite fault, 1964 Alaska earthquake
 │   ├── 04_DART_arrival_times.ipynb            # Predicted DART arrival times, 2021 Chignik M8.2
-│   └── 05_CSZ_coastal_arrival_times.ipynb    # Minimum tsunami arrival times at the US/BC coast, CSZ
+│   ├── 05_CSZ_coastal_arrival_times.ipynb    # Minimum tsunami arrival times at the US/BC coast, CSZ
+│   └── 06_Wailau_dispersive_rays.ipynb       # Dispersive vs shallow-water rays, Wailau Landslide
 ├── tests/
 │   ├── test_rk4.py        # Unit tests for the RK4 integrator (great-circle accuracy)
 │   └── test_trace_rays.py # Integration tests for trace_rays() (shape, symmetry, Snell's law)
@@ -239,12 +240,12 @@ Or with verbose output:
 pytest -v
 ```
 
-The test suite has 16 tests across two files:
+The test suite has 22 tests across two files:
 
 | File | Tests |
 |------|-------|
 | `tests/test_rk4.py` | RK4 integrator unit tests: great-circle accuracy across 5 azimuths, zero longitude drift for due-north ray, zero latitude drift for due-east equatorial ray, arc-length error < 1 m over 1 hour |
-| `tests/test_trace_rays.py` | Integration tests: output shape (scalar and array sources), invalid-depth-shape error, NaN consistency, meridional symmetry, Snell's law slowdown across a submarine ridge, Snell's law refraction direction on a north-deepening gradient, multi-source output shape, multi-source results match individual single-source calls |
+| `tests/test_trace_rays.py` | Integration tests: output shape (scalar and array sources), invalid-depth-shape error, NaN consistency, meridional symmetry, Snell's law slowdown across a submarine ridge, Snell's law refraction direction on a north-deepening gradient, multi-source output shape, multi-source results match individual single-source calls; dispersive tests: multiple-parameter error, shallow-water limit, deep-water limit, dispersive < shallow-water, period/frequency/wavelength consistency, output shape unchanged |
 
 ## Examples
 
@@ -258,6 +259,8 @@ The test suite has 16 tests across two files:
 
 `examples/05_CSZ_coastal_arrival_times.ipynb`: Near-field CSZ scenario addressing the question "how many minutes after the shaking does the first wave arrive?". Distributes 150 sources along the `CSZ_max_def` path (the zone of maximum seafloor deformation, between the trench and coast), traces 54,000 rays simultaneously, and grids the minimum first-arrival time across all sources. Samples the result at 200 US coast points (northern California → Washington) and 150 Canadian coast points (British Columbia) and displays them as a scatter plot coloured by arrival time overlaid on the regional travel time map. Requires `scipy` (`pip install -e ".[examples]"`).
 
+`examples/06_Wailau_dispersive_rays.ipynb`: Demonstrates the dispersive ray-tracing mode using the Wailau Landslide (north Moloka'i) as a case study. The slide's ~15 km source length scale is used as the deep-water wavelength. Two analytical figures show how dispersive group speed and the shallow-water error vary with period and wavelength at depths of 500–4 000 m; at λ = 15 km the error reaches 56 % in 4 km water (c_group ≈ 87 m/s vs √(gh) ≈ 198 m/s). A three-panel travel-time map compares shallow-water and dispersive 2-hour ray integrations and plots the delay field (dispersive − shallow-water). Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
+
 `data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. All other data files (`NE_pacific_4arcmin.nc`, `CSZ_*.txt`, `1964_slip_region.txt`) are small enough to be committed directly.
 
 To run the examples:
@@ -269,6 +272,7 @@ jupyter notebook examples/02_cascadia_travel_times.ipynb
 jupyter notebook examples/03_alaska_point_vs_finite_fault.ipynb
 jupyter notebook examples/04_DART_arrival_times.ipynb
 jupyter notebook examples/05_CSZ_coastal_arrival_times.ipynb
+jupyter notebook examples/06_Wailau_dispersive_rays.ipynb
 ```
 
 ## Performance
