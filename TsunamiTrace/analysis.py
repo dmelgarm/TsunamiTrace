@@ -6,6 +6,8 @@ geophysical products: gridded travel times, arrival envelopes, etc.
 """
 import numpy as np
 
+_DEG_TO_RAD = np.pi / 180.0
+
 
 def grid_travel_times(ray_lon, ray_lat, dt,
                       lon_arr, lat_arr, depth,
@@ -131,3 +133,69 @@ def grid_travel_times(ray_lon, ray_lat, dt,
     travel_time[~ocean_mask] = np.nan
 
     return lon_bin, lat_bin, travel_time
+
+
+def grid_azimuths(source_lon, source_lat, lon_bin, lat_bin):
+    """
+    Great-circle bearing from a source point to every cell in a bin grid.
+
+    Useful for diagnosing which azimuths have sparse ray coverage: overlay
+    this map on the raw travel-time map (``fill=False``) to read off the
+    azimuths of shadow-zone bins and add targeted rays there.
+
+    The bearing is the *initial* azimuth of the great-circle arc from the
+    source to each bin centre — the direction a ray leaving the source would
+    need to be aimed to reach that cell directly.
+
+    Parameters
+    ----------
+    source_lon : float
+        Source longitude in degrees.
+    source_lat : float
+        Source latitude in degrees.
+    lon_bin : ndarray, shape (n_lon_bin,)
+        Longitude centres of the bin grid in degrees, as returned by
+        ``grid_travel_times()``.
+    lat_bin : ndarray, shape (n_lat_bin,)
+        Latitude centres of the bin grid in degrees, as returned by
+        ``grid_travel_times()``.
+
+    Returns
+    -------
+    azimuth : ndarray, shape (n_lat_bin, n_lon_bin)
+        Great-circle bearing from the source to each bin centre, in degrees
+        clockwise from north, range [0, 360).  Shape follows the matplotlib
+        row-major convention so the array can be passed directly to
+        ``pcolormesh`` or ``contourf`` alongside ``lon_bin`` and ``lat_bin``.
+
+    Notes
+    -----
+    Uses the standard spherical bearing formula::
+
+        y = sin(Δlon) * cos(lat2)
+        x = cos(lat1) * sin(lat2) − sin(lat1) * cos(lat2) * cos(Δlon)
+        bearing = atan2(y, x)  [converted to degrees, wrapped to 0–360]
+
+    This is the great-circle *initial* bearing, not the rhumb-line bearing.
+
+    Examples
+    --------
+    >>> lon_b, lat_b, tt = tt.grid_travel_times(ray_lon, ray_lat, ...)
+    >>> az = tt.grid_azimuths(source_lon, source_lat, lon_b, lat_b)
+    >>> plt.pcolormesh(lon_b, lat_b, az, cmap='twilight', shading='nearest')
+    """
+    lon_bin = np.asarray(lon_bin, dtype=float)
+    lat_bin = np.asarray(lat_bin, dtype=float)
+
+    phi1 = source_lat * _DEG_TO_RAD
+    lam1 = source_lon * _DEG_TO_RAD
+
+    LON_BIN, LAT_BIN = np.meshgrid(lon_bin, lat_bin)   # (n_lat_bin, n_lon_bin)
+
+    phi2 = LAT_BIN * _DEG_TO_RAD
+    d_lam = (LON_BIN - source_lon) * _DEG_TO_RAD
+
+    y = np.sin(d_lam) * np.cos(phi2)
+    x = np.cos(phi1) * np.sin(phi2) - np.sin(phi1) * np.cos(phi2) * np.cos(d_lam)
+
+    return np.degrees(np.arctan2(y, x)) % 360.0
