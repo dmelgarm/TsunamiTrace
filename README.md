@@ -48,11 +48,11 @@ https://github.com/adityagusman/tsunami-raytracing
 ```
 TsunamiTrace/
 ├── TsunamiTrace/
-│   ├── __init__.py        # Public API: trace_rays(), load_bathymetry(), grid_travel_times()
+│   ├── __init__.py        # Public API: trace_rays(), load_bathymetry(), grid_travel_times(), grid_azimuths()
 │   ├── raytracing.py      # trace_rays(): builds slowness field, fans rays from one or more sources
 │   ├── _rungekutta.py     # _integrate_rays(): vectorised RK4 integrator for all rays
 │   ├── io.py              # load_bathymetry(): bathymetry file loaders
-│   └── analysis.py        # grid_travel_times(): post-processing of ray output
+│   └── analysis.py        # grid_travel_times(), grid_azimuths(): post-processing of ray output
 ├── data/
 │   ├── cascadia.xyz            # SRTM30+ 30 arc-second bathymetry, Cascadia (Git LFS)
 │   └── NE_pacific_4arcmin.nc  # ETOPO2 4 arc-minute bathymetry, NE Pacific / Alaska
@@ -177,6 +177,28 @@ lon_bin, lat_bin, travel_time = tt.grid_travel_times(
 # Ready for matplotlib:
 import matplotlib.pyplot as plt
 plt.contourf(lon_bin, lat_bin, travel_time, cmap='plasma_r')
+
+# Pass fill=False to see raw ray coverage — bins with no ray hit are NaN
+# and can be rendered in grey to diagnose shadow zones:
+_, _, travel_time_raw = tt.grid_travel_times(
+    ray_lon, ray_lat, dt=30,
+    lon_arr=lon_arr, lat_arr=lat_arr, depth=depth,
+    bin_deg=0.1, fill=False,
+)
+```
+
+### Source azimuth map
+
+```python
+# Great-circle bearing from the source to every bin centre.
+# Useful for identifying which azimuths have poor ray coverage
+# and need a denser ray fan.
+azimuth = tt.grid_azimuths(source_lon, source_lat, lon_bin, lat_bin)
+# azimuth: shape (n_lat_bin, n_lon_bin), degrees clockwise from north, range [0, 360)
+
+# twilight is a circular colormap — 0° and 360° match seamlessly
+plt.pcolormesh(lon_bin, lat_bin, azimuth, cmap='twilight', vmin=0, vmax=360,
+               shading='nearest')
 ```
 
 ## Running the tests
@@ -203,7 +225,7 @@ The test suite has 16 tests across two files:
 
 `examples/ridge_refraction.ipynb`: Jupyter notebook demonstrating ray refraction across a synthetic N-S submarine ridge. A Gaussian ridge sits between the source and the western edge of the domain; the shallow ridge crest slows the wave from ~221 m/s (deep ocean) to ~63 m/s (ridge crest), bending rays toward the normal to the isobaths.
 
-`examples/cascadia_travel_times.ipynb`: Real-bathymetry example using an SRTM30+ 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 36,000 rays from a source on the locked zone of the megathrust (47.86°N, 124.91°W) and produces a first-arrival travel time map for the Pacific Northwest coast using `tt.grid_travel_times`. Requires `scipy` (`pip install -e ".[examples]"`).
+`examples/cascadia_travel_times.ipynb`: Real-bathymetry example using an SRTM30+ 30 arc-second grid of the Cascadia subduction zone (offshore Washington / Oregon / British Columbia). Traces 360,000 rays from a source on the locked zone of the megathrust (47.65°N, 125.50°W) and produces several diagnostic and final maps: a filled first-arrival travel time map (`fill=True`), a raw ray-coverage map with NaN cells rendered in grey (`fill=False`), a combined travel-time-plus-rays overlay, and an azimuth map (`tt.grid_azimuths`) with the travel-time contours to identify which source azimuths have sparse ray coverage. Requires `scipy` (`pip install -e ".[examples]"`).
 
 `examples/alaska_point_vs_finite_fault.ipynb`: Trans-oceanic travel time example using an ETOPO2 4 arc-minute NetCDF grid of the NE Pacific. Models the 1964 Alaska earthquake source (nudged offshore to 60.07°N, 146.68°W) and integrates 360,000 rays for 12 hours to capture trans-oceanic propagation. Compares point-source and finite-fault approaches. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
 
@@ -229,7 +251,7 @@ On a 350 × 400 grid with a 30 s time step and 4-hour integration this gives rou
 | 180 rays  | ~70 ms    |
 | 720 rays  | ~125 ms   |
 
-The Cascadia example runs 1800 rays on a 1080 × 1560 grid (dt = 60 s, 4-hour integration) in a few seconds on a laptop.
+The Cascadia example runs 360,000 rays on a 1080 × 1560 grid (dt = 180 s, 2.5-hour integration) in roughly a minute on a laptop.
 
 Scaling with ray count is much flatter than a sequential loop because the per-ray overhead is absorbed into NumPy's C-level inner loop.
 
