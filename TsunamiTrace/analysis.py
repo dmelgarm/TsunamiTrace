@@ -135,6 +135,91 @@ def grid_travel_times(ray_lon, ray_lat, dt,
     return lon_bin, lat_bin, travel_time
 
 
+def sample_travel_times(lon_bin, lat_bin, travel_time, lons, lats,
+                        max_snap_bins=5):
+    """
+    Sample a travel-time grid at arbitrary lon/lat receiver locations.
+
+    For each query point the nearest grid bin is looked up.  If that bin is
+    NaN (the point landed on a land cell or an unfilled shadow zone), the
+    function searches an expanding square neighbourhood and returns the value
+    of the nearest non-NaN bin.  The nearest bin is chosen by Euclidean
+    distance in index space, so the result is always the geographically
+    closest valid sample rather than the minimum in the patch.
+
+    Parameters
+    ----------
+    lon_bin : ndarray, shape (n_lon_bin,)
+        Longitude bin centres, as returned by ``grid_travel_times()``.
+    lat_bin : ndarray, shape (n_lat_bin,)
+        Latitude bin centres, as returned by ``grid_travel_times()``.
+    travel_time : ndarray, shape (n_lat_bin, n_lon_bin)
+        Travel-time grid in hours, as returned by ``grid_travel_times()``.
+        NaN over land.
+    lons : array-like, shape (n_pts,)
+        Receiver longitudes in degrees.
+    lats : array-like, shape (n_pts,)
+        Receiver latitudes in degrees.
+    max_snap_bins : int, default 5
+        Maximum search radius in grid bins when snapping a land-cell hit to
+        the nearest ocean bin.  At ``bin_deg=0.1°`` the default of 5 bins
+        corresponds to ~55 km.  Points still NaN after the search are
+        returned as NaN.
+
+    Returns
+    -------
+    times : ndarray, shape (n_pts,)
+        Travel times in hours at each receiver location.  NaN for any point
+        that could not be resolved within ``max_snap_bins``.
+    n_snapped : int
+        Number of points that were snapped from a land bin to the nearest
+        ocean bin.  Useful for a quick sanity check; a large number suggests
+        the receiver coordinates are significantly inland.
+
+    Examples
+    --------
+    >>> lon_bin, lat_bin, tt = tt.grid_travel_times(ray_lon, ray_lat, ...)
+    >>> times, n_snap = tt.sample_travel_times(
+    ...     lon_bin, lat_bin, tt,
+    ...     lons=dart_lons, lats=dart_lats,
+    ... )
+    >>> print(times * 60)   # minutes
+    """
+    lons = np.asarray(lons, dtype=float)
+    lats = np.asarray(lats, dtype=float)
+
+    # Nearest bin index for each receiver (vectorised)
+    i_lons = np.argmin(np.abs(lon_bin[:, None] - lons[None, :]), axis=0)
+    i_lats = np.argmin(np.abs(lat_bin[:, None] - lats[None, :]), axis=0)
+    result  = travel_time[i_lats, i_lons].copy()
+
+    n_snapped = 0
+    for k in np.where(np.isnan(result))[0]:
+        # Expand outward one ring at a time; pick the nearest non-NaN bin
+        # by index-space distance so we don't accidentally jump far away.
+        found = False
+        for r in range(1, max_snap_bins + 1):
+            r0 = max(0, i_lats[k] - r);  r1 = min(len(lat_bin), i_lats[k] + r + 1)
+            c0 = max(0, i_lons[k] - r);  c1 = min(len(lon_bin), i_lons[k] + r + 1)
+            patch = travel_time[r0:r1, c0:c1]
+            valid  = ~np.isnan(patch)
+            if valid.any():
+                # Among valid cells in the patch find the one closest in
+                # index space to the original query point.
+                rows, cols = np.where(valid)
+                abs_rows   = rows + r0
+                abs_cols   = cols + c0
+                dists      = (abs_rows - i_lats[k])**2 + (abs_cols - i_lons[k])**2
+                best       = np.argmin(dists)
+                result[k]  = travel_time[abs_rows[best], abs_cols[best]]
+                n_snapped += 1
+                found = True
+                break
+        # If still not found after max_snap_bins, result[k] stays NaN
+
+    return result, n_snapped
+
+
 def grid_azimuths(source_lon, source_lat, lon_bin, lat_bin):
     """
     Great-circle bearing from a source point to every cell in a bin grid.

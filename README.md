@@ -48,11 +48,11 @@ https://github.com/adityagusman/tsunami-raytracing
 ```
 TsunamiTrace/
 ├── TsunamiTrace/
-│   ├── __init__.py        # Public API: trace_rays(), load_bathymetry(), grid_travel_times(), grid_azimuths()
+│   ├── __init__.py        # Public API: trace_rays(), load_bathymetry(), grid_travel_times(), grid_azimuths(), sample_travel_times()
 │   ├── raytracing.py      # trace_rays(): builds slowness field, fans rays from one or more sources
 │   ├── _rungekutta.py     # _integrate_rays(): vectorised RK4 integrator for all rays
 │   ├── io.py              # load_bathymetry(): bathymetry file loaders
-│   └── analysis.py        # grid_travel_times(), grid_azimuths(): post-processing of ray output
+│   └── analysis.py        # grid_travel_times(), grid_azimuths(), sample_travel_times(): post-processing of ray output
 ├── data/
 │   ├── cascadia.xyz            # SRTM30+ 30 arc-second bathymetry, Cascadia (Git LFS)
 │   ├── NE_pacific_4arcmin.nc  # ETOPO2 4 arc-minute bathymetry, NE Pacific / Alaska
@@ -192,6 +192,24 @@ _, _, travel_time_raw = tt.grid_travel_times(
     lon_arr=lon_arr, lat_arr=lat_arr, depth=depth,
     bin_deg=0.1, fill=False,
 )
+```
+
+### Sampling travel times at receiver locations
+
+```python
+# Query the travel-time grid at a set of tide gauges, DART buoys, or
+# coastal points.  If a receiver lands on a land cell the function
+# automatically snaps it to the nearest ocean bin.
+dart_lons = np.array([-152.35, -148.57, -143.69])
+dart_lats = np.array([  53.68,   55.34,   57.65])
+
+times_hr, n_snapped = tt.sample_travel_times(
+    lon_bin, lat_bin, travel_time,
+    lons=dart_lons, lats=dart_lats,
+    max_snap_bins=5,          # search up to 5 bins (~55 km at 0.1°) for ocean
+)
+print(times_hr * 60)          # convert hours → minutes
+# n_snapped: number of receivers that were snapped off a land cell
 ```
 
 ### Source azimuth map
