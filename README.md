@@ -59,7 +59,8 @@ TsunamiTrace/
 ├── examples/
 │   ├── 01_ridge_refraction.ipynb              # Ray refraction across a synthetic submarine ridge
 │   ├── 02_cascadia_travel_times.ipynb         # Regional travel times for a Cascadia megathrust scenario
-│   └── 03_alaska_point_vs_finite_fault.ipynb  # Point source vs finite fault, 1964 Alaska earthquake
+│   ├── 03_alaska_point_vs_finite_fault.ipynb  # Point source vs finite fault, 1964 Alaska earthquake
+│   └── 04_DART_arrival_times.ipynb            # Predicted DART arrival times, 2021 Chignik M8.2
 ├── tests/
 │   ├── test_rk4.py        # Unit tests for the RK4 integrator (great-circle accuracy)
 │   └── test_trace_rays.py # Integration tests for trace_rays() (shape, symmetry, Snell's law)
@@ -229,6 +230,8 @@ The test suite has 16 tests across two files:
 
 `examples/03_alaska_point_vs_finite_fault.ipynb`: Trans-oceanic travel time example using an ETOPO2 4 arc-minute NetCDF grid of the NE Pacific. Models the 1964 Alaska earthquake source (nudged offshore to 60.07°N, 146.68°W) and integrates 360,000 rays for 12 hours to capture trans-oceanic propagation. Compares point-source and finite-fault approaches. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
 
+`examples/04_DART_arrival_times.ipynb`: Regional travel time example for the 2021 Chignik M8.2 earthquake (55.36°N, 157.89°W) in the Gulf of Alaska. Traces 360 rays for 3 hours and produces a first-arrival travel time map for the Gulf of Alaska, then samples predicted arrival times at three nearby DART buoys (46414, 46409, 46410) and annotates them on the map. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
+
 `data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. `data/NE_pacific_4arcmin.nc` is small enough (2.9 MB) to be committed directly.
 
 To run the examples:
@@ -238,6 +241,7 @@ conda activate tsunamitrace
 jupyter notebook examples/01_ridge_refraction.ipynb
 jupyter notebook examples/02_cascadia_travel_times.ipynb
 jupyter notebook examples/03_alaska_point_vs_finite_fault.ipynb
+jupyter notebook examples/04_DART_arrival_times.ipynb
 ```
 
 ## Performance
