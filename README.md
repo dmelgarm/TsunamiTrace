@@ -20,7 +20,7 @@ The most common use of TsunamiTrace is computing **first-arrival travel time map
 
 Tsunami waves travel at a speed determined by the local water depth: `c = sqrt(g * depth)`. Because depth varies across the ocean floor, rays continuously refract, bending toward shallower regions where they travel more slowly. This is the ocean-surface analogue of seismic ray theory.
 
-TsunamiTrace computes these ray paths by integrating the spherical ray-tracing equations (Snell's law adapted for a sphere) from a single point source across a fan of azimuths. The state vector at each time step is (colatitude θ, longitude φ, ray direction ψ), governed by:
+TsunamiTrace computes these ray paths by integrating the spherical ray-tracing equations (Snell's law adapted for a sphere) from one or more sources across a fan of azimuths. A single point source returns a `(n_azimuths, n_steps)` array; an array of sources (finite-fault sub-faults, for example) returns `(n_sources, n_azimuths, n_steps)` — all sources are integrated in a single vectorised RK4 pass. The state vector at each time step is (colatitude θ, longitude φ, ray direction ψ), governed by:
 
 ```
 dθ/dt  =  cos(ψ) / (n · R)
