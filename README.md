@@ -2,6 +2,11 @@
 
 Python package for tsunami ray tracing on a sphere using 4th-order Runge-Kutta integration.
 
+Two wave speed models are supported:
+
+- **Shallow-water** (default): `c = sqrt(g · h)` — the standard long-wave approximation, accurate for large earthquakes whose rupture length far exceeds the ocean depth.
+- **Dispersive** (optional): full linear dispersion relation `ω² = g · k · tanh(k · h)`, using the **group speed** at each grid cell. Activated by passing `period`, `frequency`, or `wavelength` to `trace_rays()`. This matters for sources whose characteristic length scale is comparable to or smaller than the ocean depth — **submarine and subaerial landslides**, **volcanic eruptions**, and other short-wavelength sources. At a 15 km wavelength the dispersive group speed is roughly half `sqrt(g · h)` at mid-ocean depths, so the shallow-water approximation overestimates wave speed — and underestimates travel time — by more than 50 %.
+
 ## Applications
 
 The most common use of TsunamiTrace is computing **first-arrival travel time maps**: grids that show how many minutes or hours after a geophysical source (earthquake, volcanic eruption, or submarine landslide) a tsunami would reach any point in the ocean.  These maps underpin two broad classes of work:
@@ -259,7 +264,7 @@ The test suite has 22 tests across two files:
 
 `examples/05_CSZ_coastal_arrival_times.ipynb`: Near-field CSZ scenario addressing the question "how many minutes after the shaking does the first wave arrive?". Distributes 150 sources along the `CSZ_max_def` path (the zone of maximum seafloor deformation, between the trench and coast), traces 54,000 rays simultaneously, and grids the minimum first-arrival time across all sources. Samples the result at 200 US coast points (northern California → Washington) and 150 Canadian coast points (British Columbia) and displays them as a scatter plot coloured by arrival time overlaid on the regional travel time map. Requires `scipy` (`pip install -e ".[examples]"`).
 
-`examples/06_Wailau_dispersive_rays.ipynb`: Demonstrates the dispersive ray-tracing mode using the Wailau Landslide (north Moloka'i) as a case study. The slide's ~15 km source length scale is used as the deep-water wavelength. Two analytical figures show how dispersive group speed and the shallow-water error vary with period and wavelength at depths of 500–4 000 m; at λ = 15 km the error reaches 56 % in 4 km water (c_group ≈ 87 m/s vs √(gh) ≈ 198 m/s). A three-panel travel-time map compares shallow-water and dispersive 2-hour ray integrations and plots the delay field (dispersive − shallow-water). Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
+`examples/06_Wailau_dispersive_rays.ipynb`: Demonstrates the dispersive ray-tracing mode using the Wailau Landslide (north Moloka'i, 21.35°N 156.85°W) as a case study. The slide's ~15 km source length scale is used as the deep-water wavelength. Two analytical figures show how dispersive group speed and the shallow-water error vary with period and wavelength at depths of 500–4 000 m; at λ = 15 km the error reaches 56 % in 4 km water (c_group ≈ 87 m/s vs √(gh) ≈ 198 m/s). A three-panel travel-time map runs the full ETOPO2 NE Pacific grid (no domain subsetting): shallow-water rays for 12 h (43 200 s, dt=60 s) and dispersive rays for 24 h (86 400 s, dt=120 s) — both 720 time steps — so each wavefront covers the entire basin. The third panel shows the delay field (dispersive − shallow-water), with the dispersive wave taking roughly twice as long to cross the basin. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
 
 `data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. All other data files (`NE_pacific_4arcmin.nc`, `CSZ_*.txt`, `1964_slip_region.txt`) are small enough to be committed directly.
 
