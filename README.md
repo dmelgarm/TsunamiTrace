@@ -4,8 +4,8 @@ Python package for tsunami ray tracing on a sphere using 4th-order Runge-Kutta i
 
 Two wave speed models are supported:
 
-- **Shallow-water** (default): `c = sqrt(g · h)` — the standard long-wave approximation, accurate for large earthquakes whose rupture length far exceeds the ocean depth.
-- **Dispersive** (optional): full linear dispersion relation `ω² = g · k · tanh(k · h)`, using the **group speed** at each grid cell. Activated by passing `period`, `frequency`, or `wavelength` to `trace_rays()`. This matters for sources whose characteristic length scale is comparable to or smaller than the ocean depth — **submarine and subaerial landslides**, **volcanic eruptions**, and other short-wavelength sources. At a 15 km wavelength the dispersive group speed is roughly half `sqrt(g · h)` at mid-ocean depths, so the shallow-water approximation overestimates wave speed — and underestimates travel time — by more than 50 %.
+- **Shallow-water** (default): `c = sqrt(g · h)`, the standard long-wave approximation, accurate for large earthquakes whose rupture length far exceeds the ocean depth.
+- **Dispersive** (optional): full linear dispersion relation `ω² = g · k · tanh(k · h)`, using the **group speed** at each grid cell. Activated by passing `period`, `frequency`, or `wavelength` to `trace_rays()`. This matters for sources whose characteristic length scale is comparable to or smaller than the ocean depth, including **submarine and subaerial landslides**, **volcanic eruptions**, and other short-wavelength sources. At a 15 km wavelength the dispersive group speed is roughly half `sqrt(g · h)` at mid-ocean depths, so the shallow-water approximation overestimates wave speed (and underestimates travel time) by more than 50 %.
 
 ## Applications
 
@@ -25,7 +25,7 @@ The most common use of TsunamiTrace is computing **first-arrival travel time map
 
 Tsunami waves travel at a speed determined by the local water depth: `c = sqrt(g * depth)`. Because depth varies across the ocean floor, rays continuously refract, bending toward shallower regions where they travel more slowly. This is the ocean-surface analogue of seismic ray theory.
 
-TsunamiTrace computes these ray paths by integrating the spherical ray-tracing equations (Snell's law adapted for a sphere) from one or more sources across a fan of azimuths. A single point source returns a `(n_azimuths, n_steps)` array; an array of sources (finite-fault sub-faults, for example) returns `(n_sources, n_azimuths, n_steps)` — all sources are integrated in a single vectorised RK4 pass. The state vector at each time step is (colatitude θ, longitude φ, ray direction ψ), governed by:
+TsunamiTrace computes these ray paths by integrating the spherical ray-tracing equations (Snell's law adapted for a sphere) from one or more sources across a fan of azimuths. A single point source returns a `(n_azimuths, n_steps)` array; an array of sources (finite-fault sub-faults, for example) returns `(n_sources, n_azimuths, n_steps)`, and all sources are integrated in a single vectorised RK4 pass. The state vector at each time step is (colatitude θ, longitude φ, ray direction ψ), governed by:
 
 ```
 dθ/dt  =  cos(ψ) / (n · R)
@@ -63,7 +63,7 @@ TsunamiTrace/
 │   ├── NE_pacific_4arcmin.nc  # ETOPO2 4 arc-minute bathymetry, NE Pacific / Alaska
 │   ├── CSZ_trench.txt          # CSZ trench axis polyline (plotting reference)
 │   ├── CSZ_max_def.txt         # CSZ max-deformation path (source line for notebook 05)
-│   ├── CSZ_US_coast.txt        # Pacific coast receiver points, N. California → Washington
+│   ├── CSZ_US_coast.txt        # Pacific coast receiver points, N. California to Washington
 │   ├── CSZ_CA_coast.txt        # Pacific coast receiver points, British Columbia
 │   └── 1964_slip_region.txt    # 1964 Alaska earthquake rupture polygon (notebook 03)
 ├── examples/
@@ -113,14 +113,14 @@ The format is detected automatically from the file extension.
 ```python
 import TsunamiTrace as tt
 
-# Three-column ASCII (.xyz, .txt, …)
+# Three-column ASCII (.xyz, .txt, ...)
 lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.xyz')
 
-# NetCDF (.nc, .nc4) — depth variable auto-detected from common names
-# (z, elevation, topo, depth, Band1, …)
+# NetCDF (.nc, .nc4): depth variable auto-detected from common names
+# (z, elevation, topo, depth, Band1, ...)
 lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.nc')
 
-# NetCDF with an unusual variable name — specify it explicitly
+# NetCDF with an unusual variable name, specify it explicitly
 lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.nc', depth_var='sea_floor_depth')
 
 # negate=True (default) converts from the standard geographic convention
@@ -141,7 +141,7 @@ import TsunamiTrace as tt
 
 lon_arr, lat_arr, depth = tt.load_bathymetry('data/mybathy.xyz')
 
-# Single point source — returns shape (n_azimuths, n_steps)
+# Single point source, returns shape (n_azimuths, n_steps)
 ray_lon, ray_lat, ray_dir = tt.trace_rays(
     lon_arr,      # 1-D array of longitudes (degrees)
     lat_arr,      # 1-D array of latitudes (degrees)
@@ -154,7 +154,7 @@ ray_lon, ray_lat, ray_dir = tt.trace_rays(
 )
 # ray_lon, ray_lat, ray_dir: shape (n_azimuths, n_steps), NaN-padded after boundary exit
 
-# Finite fault / multi-source — returns shape (n_sources, n_azimuths, n_steps)
+# Finite fault / multi-source, returns shape (n_sources, n_azimuths, n_steps)
 src_lons = np.array([155.0, 157.0, 159.0])   # sub-fault centroids
 src_lats = np.array([-1.0,   0.0,   1.0])
 
@@ -166,7 +166,7 @@ ray_lon, ray_lat, ray_dir = tt.trace_rays(
     azimuths_deg=np.arange(0, 360, 2),
 )
 # All sources and azimuths are integrated in a single vectorised RK4 pass.
-# Pass the (n_sources, n_azimuths, n_steps) arrays directly to grid_travel_times —
+# Pass the (n_sources, n_azimuths, n_steps) arrays directly to grid_travel_times;
 # it flattens them internally and keeps the minimum travel time per cell across
 # all sources, giving a true first-arrival map for the entire finite fault.
 ```
@@ -191,7 +191,7 @@ lon_bin, lat_bin, travel_time = tt.grid_travel_times(
 import matplotlib.pyplot as plt
 plt.contourf(lon_bin, lat_bin, travel_time, cmap='plasma_r')
 
-# Pass fill=False to see raw ray coverage — bins with no ray hit are NaN
+# Pass fill=False to see raw ray coverage; bins with no ray hit are NaN
 # and can be rendered in grey to diagnose shadow zones:
 _, _, travel_time_raw = tt.grid_travel_times(
     ray_lon, ray_lat, dt=30,
@@ -214,7 +214,7 @@ times_hr, n_snapped = tt.sample_travel_times(
     lons=dart_lons, lats=dart_lats,
     max_snap_bins=5,          # search up to 5 bins (~55 km at 0.1°) for ocean
 )
-print(times_hr * 60)          # convert hours → minutes
+print(times_hr * 60)          # convert hours to minutes
 # n_snapped: number of receivers that were snapped off a land cell
 ```
 
@@ -227,7 +227,7 @@ print(times_hr * 60)          # convert hours → minutes
 azimuth = tt.grid_azimuths(source_lon, source_lat, lon_bin, lat_bin)
 # azimuth: shape (n_lat_bin, n_lon_bin), degrees clockwise from north, range [0, 360)
 
-# twilight is a circular colormap — 0° and 360° match seamlessly
+# twilight is a circular colormap, 0° and 360° match seamlessly
 plt.pcolormesh(lon_bin, lat_bin, azimuth, cmap='twilight', vmin=0, vmax=360,
                shading='nearest')
 ```
@@ -262,9 +262,9 @@ The test suite has 22 tests across two files:
 
 `examples/04_DART_arrival_times.ipynb`: Regional travel time example for the 2021 Chignik M8.2 earthquake (55.36°N, 157.89°W) in the Gulf of Alaska. Traces 360 rays for 3 hours and produces a first-arrival travel time map for the Gulf of Alaska, then samples predicted arrival times at three nearby DART buoys (46414, 46409, 46410) and annotates them on the map. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
 
-`examples/05_CSZ_coastal_arrival_times.ipynb`: Near-field CSZ scenario addressing the question "how many minutes after the shaking does the first wave arrive?". Distributes 150 sources along the `CSZ_max_def` path (the zone of maximum seafloor deformation, between the trench and coast), traces 54,000 rays simultaneously, and grids the minimum first-arrival time across all sources. Samples the result at 200 US coast points (northern California → Washington) and 150 Canadian coast points (British Columbia) and displays them as a scatter plot coloured by arrival time overlaid on the regional travel time map. Requires `scipy` (`pip install -e ".[examples]"`).
+`examples/05_CSZ_coastal_arrival_times.ipynb`: Near-field CSZ scenario addressing the question "how many minutes after the shaking does the first wave arrive?". Distributes 150 sources along the `CSZ_max_def` path (the zone of maximum seafloor deformation, between the trench and coast), traces 54,000 rays simultaneously, and grids the minimum first-arrival time across all sources. Samples the result at 200 US coast points (northern California to Washington) and 150 Canadian coast points (British Columbia) and displays them as a scatter plot coloured by arrival time overlaid on the regional travel time map. Requires `scipy` (`pip install -e ".[examples]"`).
 
-`examples/06_Wailau_dispersive_rays.ipynb`: Demonstrates the dispersive ray-tracing mode using the Wailau Landslide (north Moloka'i, 21.35°N 156.85°W) as a case study. The slide's ~15 km source length scale is used as the deep-water wavelength. Two analytical figures show how dispersive group speed and the shallow-water error vary with period and wavelength at depths of 500–4 000 m; at λ = 15 km the error reaches 56 % in 4 km water (c_group ≈ 87 m/s vs √(gh) ≈ 198 m/s). A three-panel travel-time map runs the full ETOPO2 NE Pacific grid (no domain subsetting): shallow-water rays for 12 h (43 200 s, dt=60 s) and dispersive rays for 24 h (86 400 s, dt=120 s) — both 720 time steps — so each wavefront covers the entire basin. The third panel shows the delay field (dispersive − shallow-water), with the dispersive wave taking roughly twice as long to cross the basin. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
+`examples/06_Wailau_dispersive_rays.ipynb`: Demonstrates the dispersive ray-tracing mode using the Wailau Landslide (north Moloka'i, 21.35°N 156.85°W) as a case study. The slide's ~15 km source length scale is used as the deep-water wavelength. Two analytical figures show how dispersive group speed and the shallow-water error vary with period and wavelength at depths of 500–4 000 m; at λ = 15 km the error reaches 56 % in 4 km water (c_group ≈ 87 m/s vs sqrt(gh) ≈ 198 m/s). A three-panel travel-time map runs the full ETOPO2 NE Pacific grid (no domain subsetting): shallow-water rays for 12 h (43 200 s, dt=60 s) and dispersive rays for 24 h (86 400 s, dt=120 s), both 720 time steps, so each wavefront covers the entire basin. The third panel shows the delay field (dispersive minus shallow-water), with the dispersive wave taking roughly twice as long to cross the basin. Requires `scipy` and `netCDF4` (`pip install -e ".[examples]"`).
 
 `data/cascadia.xyz` is stored in Git LFS (51 MB). After cloning, run `git lfs pull` if it is not automatically retrieved. All other data files (`NE_pacific_4arcmin.nc`, `CSZ_*.txt`, `1964_slip_region.txt`) are small enough to be committed directly.
 
