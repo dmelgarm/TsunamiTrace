@@ -315,7 +315,8 @@ def test_dispersive_shallow_water_limit(flat_ocean):
     omega = 2.0 * np.pi / (6 * 3600.0)   # T = 6 h
     depth = np.array([[h]])
     c_sw  = np.sqrt(9.8 * h)
-    c_g   = _dispersive_group_speed(depth, omega)[0, 0]
+    c_group, _ = _dispersive_group_speed(depth, omega)
+    c_g   = c_group[0, 0]
     assert abs(c_g - c_sw) / c_sw < 1e-3, (
         f"6-hour wave in 4000 m: dispersive c_group={c_g:.4f} m/s, "
         f"shallow-water={c_sw:.4f} m/s, relative error={abs(c_g-c_sw)/c_sw:.2e}"
@@ -336,7 +337,8 @@ def test_dispersive_deep_water_limit():
     h     = 5000.0
     depth = np.array([[h]])
     c_deep = np.sqrt(9.8 / k) / 2.0      # expected deep-water group speed
-    c_g    = _dispersive_group_speed(depth, omega)[0, 0]
+    c_group, _ = _dispersive_group_speed(depth, omega)
+    c_g    = c_group[0, 0]
     assert abs(c_g - c_deep) / c_deep < 1e-4, (
         f"λ=10 m in 5000 m water: c_group={c_g:.6f} m/s, "
         f"expected={c_deep:.6f} m/s, rel error={abs(c_g-c_deep)/c_deep:.2e}"
@@ -356,7 +358,8 @@ def test_dispersive_slower_than_shallow_water(flat_ocean):
     c_sw  = np.sqrt(9.8 * h)
     for T in [120.0, 300.0, 600.0, 1800.0]:   # 2 min, 5 min, 10 min, 30 min
         omega = 2.0 * np.pi / T
-        c_g   = _dispersive_group_speed(flat_ocean['depth'][:1, :1], omega)[0, 0]
+        c_group, _ = _dispersive_group_speed(flat_ocean['depth'][:1, :1], omega)
+        c_g   = c_group[0, 0]
         assert c_g <= c_sw + 1e-6, (
             f"T={T:.0f} s: dispersive c_group={c_g:.4f} > sqrt(gh)={c_sw:.4f}"
         )
@@ -464,3 +467,74 @@ def test_ridge_slows_westward_ray(ridge):
         f"Ridge ray ({arc_ridge/1e3:.1f} km) should be shorter than "
         f"flat-ocean ray ({arc_flat/1e3:.1f} km) at t={MAX_TIME:.0f} s"
     )
+
+
+# ── local (in-situ) wavelength option ───────────────────────────────────────
+
+def test_local_wavelength_equivalent_deepwater_form():
+    """local_wavelength/local_depth gives the same ω as the equivalent
+    deep-water wavelength λ_local / tanh(2π h / λ_local)."""
+    from TsunamiTrace.raytracing import _resolve_omega
+    lam, h = 35_000.0, 5300.0
+    omega_local = _resolve_omega(local_wavelength=lam, local_depth=h)
+    lam_deep = lam / np.tanh(2 * np.pi * h / lam)
+    omega_deep = _resolve_omega(wavelength=lam_deep)
+    np.testing.assert_allclose(omega_local, omega_deep, rtol=1e-12)
+
+
+def test_local_wavelength_reference_values():
+    """Known (ω, c_group) at 5500 m for two in-situ wavelengths (g = 9.8)."""
+    from TsunamiTrace.raytracing import _resolve_omega, _dispersive_group_speed
+    for lam, omega_ref, cg_ref in [(30e3, 0.040985, 143.32),
+                                   (50e3, 0.027154, 188.05)]:
+        omega = _resolve_omega(local_wavelength=lam, local_depth=5500.0)
+        assert abs(omega - omega_ref) / omega_ref < 1e-4
+        cg_arr, _ = _dispersive_group_speed(np.array([[5500.0]]), omega)
+        cg = cg_arr[0, 0]
+        assert abs(cg - cg_ref) / cg_ref < 1e-4
+    # period reference for the 30 km wave
+    omega = _resolve_omega(local_wavelength=30e3, local_depth=5500.0)
+    assert abs((2 * np.pi / omega) - 153.31) / 153.31 < 1e-4
+
+
+def test_local_wavelength_shallow_water_limit():
+    """A very long in-situ wavelength -> group speed within 1% of sqrt(g h)."""
+    from TsunamiTrace.raytracing import _resolve_omega, _dispersive_group_speed
+    omega = _resolve_omega(local_wavelength=300e3, local_depth=5500.0)
+    cg_arr, _ = _dispersive_group_speed(np.array([[5500.0]]), omega)
+    cg = cg_arr[0, 0]
+    c_sw = np.sqrt(9.8 * 5500.0)                       # 232.16 m/s
+    assert abs(cg - c_sw) / c_sw < 0.01
+
+
+def test_local_wavelength_requires_depth(flat_ocean):
+    """Supplying local_wavelength without local_depth must raise ValueError."""
+    f = flat_ocean
+    with pytest.raises(ValueError):
+        tt.trace_rays(f['lon_arr'], f['lat_arr'], f['depth'],
+                      DT, 300.0, f['source_lon'], f['source_lat'], [0.0],
+                      local_wavelength=30e3)
+
+
+def test_local_wavelength_conflicts_with_period(flat_ocean):
+    """local_wavelength together with period must raise ValueError."""
+    f = flat_ocean
+    with pytest.raises(ValueError):
+        tt.trace_rays(f['lon_arr'], f['lat_arr'], f['depth'],
+                      DT, 300.0, f['source_lon'], f['source_lat'], [0.0],
+                      local_wavelength=30e3, local_depth=5500.0, period=100.0)
+
+
+def test_local_wavelength_traces_like_deepwater_equivalent(flat_ocean):
+    """End-to-end: local_wavelength and its deep-water equivalent trace the
+    same ray paths (identical ω)."""
+    f = flat_ocean
+    h = f['depth'][0, 0]
+    lam = 35_000.0
+    lam_deep = lam / np.tanh(2 * np.pi * h / lam)
+    kw = dict(lon_arr=f['lon_arr'], lat_arr=f['lat_arr'], depth=f['depth'],
+              dt=DT, max_time=600.0, source_lon=f['source_lon'],
+              source_lat=f['source_lat'], azimuths_deg=np.array([0.0, 90.0, 270.0]))
+    rl_local, _, _ = tt.trace_rays(**kw, local_wavelength=lam, local_depth=h)
+    rl_deep, _, _ = tt.trace_rays(**kw, wavelength=lam_deep)
+    np.testing.assert_allclose(rl_local, rl_deep, rtol=1e-12, equal_nan=True)

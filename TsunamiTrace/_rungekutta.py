@@ -26,24 +26,27 @@ def _dphi(theta, ray_dir, n, R):
     return np.sin(ray_dir) / (n * R * np.sin(theta))
 
 
-def _ddir(theta, ray_dir, n, dn_dcolat, dn_dphi, R):
-    # First two terms: Snell's-law refraction from the slowness gradient.
-    # Third term: spherical correction for meridian convergence (cot theta).
+def _ddir(theta, ray_dir, n_group, u_phase, ratio, du_dcolat, du_dphi, R):
+    # First two terms: Snell's-law refraction, driven by the PHASE slowness
+    # gradient with the c_group/c_phase weight from the Hamiltonian ray eqs.
+    # Third term: spherical meridian-convergence correction (cot theta); it is
+    # a geometric term and correctly keeps the GROUP slowness.
     sin_d = np.sin(ray_dir)
     cos_d = np.cos(ray_dir)
     sin_t = np.sin(theta)
     cos_t = np.cos(theta)
     return (
-        -sin_d * dn_dcolat / (n**2 * R)
-        + cos_d * dn_dphi  / (n**2 * R * sin_t)
-        - sin_d * cos_t    / (n * R * sin_t)
+        -sin_d * ratio * du_dcolat / (u_phase**2 * R)
+        + cos_d * ratio * du_dphi  / (u_phase**2 * R * sin_t)
+        - sin_d * cos_t / (n_group * R * sin_t)
     )
 
 
 # ── vectorised integrator ─────────────────────────────────────────────────────
 
 def _integrate_rays(time_arr, dt, dphi_rad, dcolat_rad,
-                    slowness, slowness_grad_phi, slowness_grad_colat,
+                    slowness, u_phase, ratio,
+                    u_phase_grad_phi, u_phase_grad_colat,
                     phi0_arr, theta0_arr, ray_dir0_arr,
                     phi_grid_start, theta_grid_start,
                     n_lon, n_lat, depth):
@@ -70,11 +73,17 @@ def _integrate_rays(time_arr, dt, dphi_rad, dcolat_rad,
         Negative when lat_arr is ascending (the standard convention), because
         colatitude decreases as the lat index increases.
     slowness : ndarray, shape (n_lon, n_lat)
-        Slowness 1/sqrt(g*depth) in s/m.  Land cells pre-set to >= 1.
-    slowness_grad_phi : ndarray, shape (n_lon-1, n_lat)
-        dn/dphi in s/(m*rad).
-    slowness_grad_colat : ndarray, shape (n_lon, n_lat-1)
-        dn/dtheta in s/(m*rad).
+        Group slowness 1/c_group in s/m.  Land cells pre-set to >= 1.  Drives
+        the position equations and the land-termination test.
+    u_phase : ndarray, shape (n_lon, n_lat)
+        Phase slowness 1/c_phase in s/m.  Land cells pre-set to >= 1.  Drives
+        the refraction terms.
+    ratio : ndarray, shape (n_lon, n_lat)
+        c_group/c_phase (1 for non-dispersive / 'group' mode / land).
+    u_phase_grad_phi : ndarray, shape (n_lon-1, n_lat)
+        d(u_phase)/dphi in s/(m*rad).
+    u_phase_grad_colat : ndarray, shape (n_lon, n_lat-1)
+        d(u_phase)/dtheta in s/(m*rad).
     phi0_arr : ndarray, shape (n_rays,)
         Initial longitude of every ray in radians.
     theta0_arr : ndarray, shape (n_rays,)
@@ -133,33 +142,41 @@ def _integrate_rays(time_arr, dt, dphi_rad, dcolat_rad,
         iy    = np.clip(lat_idx, 0, n_lat - 1)
         iy_gc = np.clip(lat_idx, 0, n_lat - 2)   # slowness_grad_colat axis-1 limit
 
-        # Freeze local medium at the current grid cell for all four RK stages
+        # Freeze local medium at the current grid cell for all four RK stages.
+        # Group slowness drives position + the land test; phase slowness (with
+        # the c_g/c_p ratio and its gradients) drives the refraction in _ddir.
         n_here         = slowness[ix, iy]
-        dn_dphi_here   = slowness_grad_phi[ix, iy]
-        dn_dcolat_here = slowness_grad_colat[ix, iy_gc]
+        u_here         = u_phase[ix, iy]
+        ratio_here     = ratio[ix, iy]
+        du_dphi_here   = u_phase_grad_phi[ix, iy]
+        du_dcolat_here = u_phase_grad_colat[ix, iy_gc]
 
         # ── RK4 ──────────────────────────────────────────────────────────────
         k1_t = _dtheta(theta, ray_dir, n_here, R)
         k1_p = _dphi(  theta, ray_dir, n_here, R)
-        k1_d = _ddir(  theta, ray_dir, n_here, dn_dcolat_here, dn_dphi_here, R)
+        k1_d = _ddir(  theta, ray_dir, n_here, u_here, ratio_here,
+                       du_dcolat_here, du_dphi_here, R)
 
         t2 = theta   + 0.5 * dt * k1_t
         d2 = ray_dir + 0.5 * dt * k1_d
         k2_t = _dtheta(t2, d2, n_here, R)
         k2_p = _dphi(  t2, d2, n_here, R)
-        k2_d = _ddir(  t2, d2, n_here, dn_dcolat_here, dn_dphi_here, R)
+        k2_d = _ddir(  t2, d2, n_here, u_here, ratio_here,
+                       du_dcolat_here, du_dphi_here, R)
 
         t3 = theta   + 0.5 * dt * k2_t
         d3 = ray_dir + 0.5 * dt * k2_d
         k3_t = _dtheta(t3, d3, n_here, R)
         k3_p = _dphi(  t3, d3, n_here, R)
-        k3_d = _ddir(  t3, d3, n_here, dn_dcolat_here, dn_dphi_here, R)
+        k3_d = _ddir(  t3, d3, n_here, u_here, ratio_here,
+                       du_dcolat_here, du_dphi_here, R)
 
         t4 = theta   + dt * k3_t
         d4 = ray_dir + dt * k3_d
         k4_t = _dtheta(t4, d4, n_here, R)
         k4_p = _dphi(  t4, d4, n_here, R)
-        k4_d = _ddir(  t4, d4, n_here, dn_dcolat_here, dn_dphi_here, R)
+        k4_d = _ddir(  t4, d4, n_here, u_here, ratio_here,
+                       du_dcolat_here, du_dphi_here, R)
 
         # Simpson-weighted update
         dt6 = dt / 6.0

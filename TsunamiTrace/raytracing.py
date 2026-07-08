@@ -14,6 +14,62 @@ from ._rungekutta import _integrate_rays
 _G = 9.8   # gravitational acceleration, m/s²
 
 
+def _resolve_omega(period=None, frequency=None, wavelength=None,
+                   local_wavelength=None, local_depth=None):
+    """
+    Reduce the mutually-exclusive wave-specification arguments to the single
+    angular frequency ω (rad/s) conserved along every ray, or ``None`` for the
+    non-dispersive default (shallow-water sqrt(g·h) everywhere).
+
+    At most ONE wave may be specified.  The options are
+
+        period                       ω = 2π / period
+        frequency                    ω = 2π · frequency
+        wavelength                   DEEP-WATER wavelength:
+                                     k = 2π/λ,  ω = sqrt(g·k)
+        (local_wavelength,           in-situ (measured) wavelength at a
+         local_depth)                reference depth h:
+                                     k = 2π/λ_local,
+                                     ω = sqrt(g·k·tanh(k·h))
+
+    ``local_wavelength`` and ``local_depth`` describe ONE option and must be
+    supplied together; the deep-water ``wavelength`` and the in-situ
+    ``local_wavelength`` are different physical quantities (see ``trace_rays``).
+    """
+    if (local_wavelength is None) != (local_depth is None):
+        raise ValueError(
+            "local_wavelength and local_depth must be supplied together "
+            "(the in-situ wavelength and the depth at which it was measured).  "
+            f"Got local_wavelength={local_wavelength}, local_depth={local_depth}."
+        )
+    local_pair = local_wavelength is not None
+
+    n_given = sum(x is not None for x in (period, frequency, wavelength)) + local_pair
+    if n_given > 1:
+        raise ValueError(
+            "Specify at most one of period, frequency, wavelength, "
+            "(local_wavelength, local_depth).  "
+            f"Got: period={period}, frequency={frequency}, "
+            f"wavelength={wavelength}, local_wavelength={local_wavelength}, "
+            f"local_depth={local_depth}."
+        )
+
+    if period is not None:
+        return 2.0 * np.pi / float(period)
+    if frequency is not None:
+        return 2.0 * np.pi * float(frequency)
+    if wavelength is not None:
+        # deep-water wavelength: k = 2π/λ, ω = sqrt(g·k)
+        k_deep = 2.0 * np.pi / float(wavelength)
+        return np.sqrt(_G * k_deep)
+    if local_pair:
+        # in-situ wavelength measured at depth h: invert the full dispersion
+        # relation exactly (no iteration) for ω.
+        k = 2.0 * np.pi / float(local_wavelength)
+        return np.sqrt(_G * k * np.tanh(k * float(local_depth)))
+    return None
+
+
 def _dispersive_group_speed(depth, omega, n_iter=15):
     """
     Compute the dispersive group speed at every grid cell.
@@ -68,6 +124,8 @@ def _dispersive_group_speed(depth, omega, n_iter=15):
     -------
     c_group : ndarray, same shape as depth
         Group speed in m/s.  Zero for land cells (depth ≤ 0).
+    c_phase : ndarray, same shape as depth
+        Phase speed ω/k in m/s.  Zero for land cells (depth ≤ 0).
     """
     ocean = depth > 0.0
     h     = np.where(ocean, depth, 1.0)   # dummy depth on land avoids /0
@@ -105,12 +163,14 @@ def _dispersive_group_speed(depth, omega, n_iter=15):
     )
     c_group = 0.5 * c_phase * (1.0 + ratio)
 
-    return np.where(ocean, c_group, 0.0)
+    return np.where(ocean, c_group, 0.0), np.where(ocean, c_phase, 0.0)
 
 
 def trace_rays(lon_arr, lat_arr, depth, dt, max_time,
                source_lon, source_lat, azimuths_deg,
-               period=None, frequency=None, wavelength=None):
+               period=None, frequency=None, wavelength=None,
+               local_wavelength=None, local_depth=None,
+               refraction="phase"):
     """
     Trace tsunami rays through a bathymetry grid.
 
@@ -148,29 +208,58 @@ def trace_rays(lon_arr, lat_arr, depth, dt, max_time,
     frequency : float, optional
         Wave frequency in Hz.  Sets ``ω = 2π · frequency``.
     wavelength : float, optional
-        Deep-water wavelength in metres.  The wavenumber ``k = 2π / λ``
+        DEEP-WATER wavelength in metres.  The wavenumber ``k = 2π / λ``
         is interpreted as the deep-water value, giving
         ``ω = sqrt(g · k)`` via the deep-water dispersion relation.
         This is the natural input for source-scale arguments: a landslide
         or volcanic source with characteristic length ``L`` generates waves
-        with dominant wavelength ``λ ≈ L``.
+        with dominant wavelength ``λ ≈ L``.  This is a DIFFERENT quantity
+        from ``local_wavelength`` below and the two must not be confused.
+    local_wavelength : float, optional
+        In-situ (locally measured) wavelength in metres, e.g. from a spatial
+        band-pass of a sea-surface-height image.  Must be given together with
+        ``local_depth``.  The wavenumber ``k = 2π / λ_local`` is taken to hold
+        at depth ``local_depth``, and ω is recovered from the FULL dispersion
+        relation ``ω = sqrt(g · k · tanh(k · h))``.  Unlike ``wavelength`` (a
+        deep-water quantity) this is the wavelength actually observed at finite
+        depth; feeding a locally measured wavelength into ``wavelength`` would
+        trace the wrong wave.
+    local_depth : float, optional
+        Depth in metres at which ``local_wavelength`` was measured.  Must be
+        given together with ``local_wavelength``.
+    refraction : {'phase', 'group'}, optional
+        Which slowness drives the ray BENDING.  ``'phase'`` (default) is the
+        physically correct choice: the path bends by the phase slowness while
+        travel time still accrues at the group speed.  ``'group'`` reproduces
+        the legacy single-field behaviour (bending by the group slowness) and
+        exists only for controlled before/after comparisons — it matches the
+        old rays bitwise.  Ignored for non-dispersive runs, where the phase and
+        group speeds coincide.
 
-    At most one of ``period``, ``frequency``, ``wavelength`` may be given.
-    If none is given (the default) the shallow-water phase speed
-    ``c = sqrt(g · h)`` is used everywhere — the standard tsunami
-    approximation.
+    At most one of ``period``, ``frequency``, ``wavelength``,
+    ``(local_wavelength, local_depth)`` may be given; the last counts as a
+    single option (the two must be supplied together).  If none is given (the
+    default) the shallow-water phase speed ``c = sqrt(g · h)`` is used
+    everywhere — the standard tsunami approximation.
 
     Dispersive wave speed
     ~~~~~~~~~~~~~~~~~~~~~
-    When a wave parameter is supplied the wave speed at each grid cell is
-    the **group speed** from the full linear dispersion relation:
+    When a wave parameter is supplied both speeds of the full linear
+    dispersion relation are used, for their two distinct roles:
 
-        ω² = g · k · tanh(k · h)   (solved for k at each depth h)
+        ω² = g · k · tanh(k · h)          (solved for k at each depth h)
         c_group = (ω/k)/2 · [1 + 2kh/sinh(2kh)]
+        c_phase = ω / k
 
-    Group speed carries wave energy and is the physically correct quantity
-    for ray theory.  It equals ``sqrt(g·h)`` in the shallow-water limit
-    (``kh → 0``) and ``sqrt(g/k)/2`` in the deep-water limit (``kh → ∞``).
+    Energy — and therefore the travel time recorded ALONG each ray — moves at
+    the **group speed**, so the position equations advance at ``c_group``.  The
+    ray PATH, however, bends according to the **phase slowness** (that is the
+    quantity the eikonal / Snell's law is written in), so refraction is driven
+    by ``1/c_phase`` with a ``c_group/c_phase`` factor from the Hamiltonian ray
+    equations.  The two coincide only in the shallow-water limit (``kh → 0``);
+    using the group slowness to bend (``refraction='group'``) under-refracts
+    short waves and, past the c_group maximum near ``kh ≈ 1.2``, bends them the
+    wrong way.
 
     For long-period tsunamis (T > 20 min) the correction relative to
     ``sqrt(g·h)`` is less than 1 %.  For dispersive wavetrains
@@ -193,9 +282,10 @@ def trace_rays(lon_arr, lat_arr, depth, dt, max_time,
     Raises
     ------
     ValueError
-        If more than one of ``period``, ``frequency``, ``wavelength`` is
-        given, or if ``depth.shape`` does not match
-        ``(len(lon_arr), len(lat_arr))``.
+        If more than one wave option among ``period``, ``frequency``,
+        ``wavelength``, ``(local_wavelength, local_depth)`` is given, if only
+        one of ``local_wavelength`` / ``local_depth`` is supplied, or if
+        ``depth.shape`` does not match ``(len(lon_arr), len(lat_arr))``.
     """
     DEG_TO_RAD = np.pi / 180.0
 
@@ -204,26 +294,9 @@ def trace_rays(lon_arr, lat_arr, depth, dt, max_time,
     depth        = np.asarray(depth,        dtype=float)
     azimuths_deg = np.asarray(azimuths_deg, dtype=float)
 
-    # ── wave parameter validation ─────────────────────────────────────────────
-    n_given = sum(x is not None for x in (period, frequency, wavelength))
-    if n_given > 1:
-        raise ValueError(
-            "Specify at most one of period, frequency, wavelength.  "
-            f"Got: period={period}, frequency={frequency}, wavelength={wavelength}."
-        )
-
-    # Convert to angular frequency ω (conserved along rays).
-    # wavelength is interpreted as the deep-water wavelength:
-    #   k = 2π/λ  →  ω = sqrt(g·k)  (deep-water dispersion relation).
-    if period is not None:
-        omega = 2.0 * np.pi / float(period)
-    elif frequency is not None:
-        omega = 2.0 * np.pi * float(frequency)
-    elif wavelength is not None:
-        k_deep = 2.0 * np.pi / float(wavelength)
-        omega  = np.sqrt(_G * k_deep)
-    else:
-        omega = None                             # non-dispersive (default)
+    # ── wave parameter → conserved angular frequency ω ─────────────────────────
+    omega = _resolve_omega(period, frequency, wavelength,
+                           local_wavelength, local_depth)
 
     # ── detect scalar vs array source ────────────────────────────────────────
     scalar_source  = np.ndim(source_lon) == 0
@@ -249,25 +322,46 @@ def trace_rays(lon_arr, lat_arr, depth, dt, max_time,
 
     n_lon, n_lat = depth.shape
 
-    # ── slowness field ────────────────────────────────────────────────────────
-    local_depth = np.where(depth < 0.0, 0.0, depth)   # land → 0
+    # ── speed fields: group (travel time) and phase (ray bending) ─────────────
+    ocean_depth = np.where(depth < 0.0, 0.0, depth)   # land → 0
+    ocean       = ocean_depth > 0.0
 
     if omega is None:
-        # Standard shallow-water phase speed: c = sqrt(g·h)
-        safe_depth = np.where(local_depth > 0.0, local_depth, 1.0)
-        c_field    = np.sqrt(_G * safe_depth)
+        # Non-dispersive: shallow-water c = sqrt(g·h).  Phase and group speeds
+        # coincide and the refraction ratio is EXACTLY unity — assigned (not
+        # divided) so non-dispersive runs stay bitwise reproducible.
+        safe_depth = np.where(ocean, ocean_depth, 1.0)
+        c_group    = np.sqrt(_G * safe_depth)
+        c_phase    = c_group
+        ratio      = np.ones_like(c_group)
     else:
-        # Dispersive group speed from the full dispersion relation
-        c_field = _dispersive_group_speed(local_depth, omega)
+        # Dispersive: the path bends by the PHASE slowness while energy (travel
+        # time) advances at the GROUP speed.
+        c_group, c_phase = _dispersive_group_speed(ocean_depth, omega)
+        safe_cp0 = np.where(c_phase > 0.0, c_phase, 1.0)
+        ratio    = np.where(ocean, c_group / safe_cp0, 1.0)   # land → 1
+
+    # Reproducibility switch: 'group' collapses the phase field onto the group
+    # field and sets ratio = 1, restoring the legacy single-field equations
+    # exactly (bitwise).  'phase' is the default, physically correct behaviour.
+    if refraction == "group":
+        c_phase = c_group
+        ratio   = np.ones_like(c_group)
+    elif refraction != "phase":
+        raise ValueError(
+            f"refraction must be 'phase' or 'group', got {refraction!r}.")
 
     # Land cells get sentinel slowness = 1 to trigger the boundary exit in
-    # _integrate_rays without causing a divide-by-zero.
-    safe_c   = np.where(c_field > 0.0, c_field, 1.0)
-    slowness = np.where(local_depth > 0.0, 1.0 / safe_c, 1.0)
+    # _integrate_rays without a divide-by-zero.  Group slowness drives the
+    # position equations and the land test; phase slowness drives the bending.
+    safe_cg  = np.where(c_group > 0.0, c_group, 1.0)
+    slowness = np.where(ocean, 1.0 / safe_cg, 1.0)            # group, 1/c_g
+    safe_cp  = np.where(c_phase > 0.0, c_phase, 1.0)
+    u_phase  = np.where(ocean, 1.0 / safe_cp, 1.0)            # phase, 1/c_p
 
-    # ── slowness gradients ────────────────────────────────────────────────────
-    slowness_grad_phi   = np.diff(slowness, axis=0) / dphi_rad
-    slowness_grad_colat = np.diff(slowness, axis=1) / dcolat_rad
+    # ── phase-slowness gradients (drive refraction) ───────────────────────────
+    u_phase_grad_phi   = np.diff(u_phase, axis=0) / dphi_rad
+    u_phase_grad_colat = np.diff(u_phase, axis=1) / dcolat_rad
 
     # ── time array ────────────────────────────────────────────────────────────
     time_arr = np.arange(0.0, max_time + dt, dt)
@@ -283,10 +377,11 @@ def trace_rays(lon_arr, lat_arr, depth, dt, max_time,
     # ── ray integration ───────────────────────────────────────────────────────
     out_phi, out_theta, out_ray_dir = _integrate_rays(
         time_arr, dt, dphi_rad, dcolat_rad,
-        slowness, slowness_grad_phi, slowness_grad_colat,
+        slowness, u_phase, ratio,
+        u_phase_grad_phi, u_phase_grad_colat,
         phi0_arr, theta0_arr, ray_dir0_arr,
         phi_grid_start, theta_grid_start,
-        n_lon, n_lat, local_depth,
+        n_lon, n_lat, ocean_depth,
     )
 
     # ── convert to geographic coordinates ────────────────────────────────────

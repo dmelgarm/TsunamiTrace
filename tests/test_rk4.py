@@ -53,6 +53,8 @@ def flat_ocean():
         n_lat            = n_lat,
         slowness_grid    = np.full((n_lon, n_lat), SLOWNESS),
         depth_grid       = np.full((n_lon, n_lat), DEPTH),
+        # non-dispersive: phase slowness == group slowness, ratio == 1
+        ratio_grid       = np.ones((n_lon, n_lat)),
         grad_phi         = np.zeros((n_lon - 1, n_lat)),
         grad_colat       = np.zeros((n_lon, n_lat - 1)),
         dphi_rad         = abs(lon_arr[1] - lon_arr[0]) * DEG_TO_RAD,
@@ -74,7 +76,8 @@ def _run_ray(grid, azimuth):
 
     out_phi, out_theta, out_ray_dir = _integrate_rays(
         g['time_arr'], DT, g['dphi_rad'], g['dcolat_rad'],
-        g['slowness_grid'], g['grad_phi'], g['grad_colat'],
+        g['slowness_grid'], g['slowness_grid'], g['ratio_grid'],
+        g['grad_phi'], g['grad_colat'],
         phi0, theta0, dir0,
         g['phi_grid_start'], g['theta_grid_start'],
         g['n_lon'], g['n_lat'], g['depth_grid'],
