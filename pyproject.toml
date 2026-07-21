@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TsunamiTrace"
-version = "0.1.0"
+version = "1.0.0"
 description = "Tsunami ray tracing on a sphere using 4th-order Runge-Kutta integration"
 readme = "README.md"
 license = { file = "license.txt" }

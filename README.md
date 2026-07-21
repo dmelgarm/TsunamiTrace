@@ -74,8 +74,9 @@ TsunamiTrace/
 │   ├── 05_CSZ_coastal_arrival_times.ipynb    # Minimum tsunami arrival times at the US/BC coast, CSZ
 │   └── 06_Wailau_dispersive_rays.ipynb       # Dispersive vs shallow-water rays, Wailau Landslide
 ├── tests/
-│   ├── test_rk4.py        # Unit tests for the RK4 integrator (great-circle accuracy)
-│   └── test_trace_rays.py # Integration tests for trace_rays() (shape, symmetry, Snell's law)
+│   ├── test_rk4.py         # Unit tests for the RK4 integrator (great-circle accuracy)
+│   ├── test_trace_rays.py  # Integration tests for trace_rays() (shape, symmetry, Snell's law)
+│   └── test_refraction.py  # Snapshot regression tests for refraction (phase vs group slowness)
 ├── pyproject.toml
 └── README.md
 ```
@@ -245,12 +246,13 @@ Or with verbose output:
 pytest -v
 ```
 
-The test suite has 22 tests across two files:
+The test suite has 34 tests across three files:
 
 | File | Tests |
 |------|-------|
 | `tests/test_rk4.py` | RK4 integrator unit tests: great-circle accuracy across 5 azimuths, zero longitude drift for due-north ray, zero latitude drift for due-east equatorial ray, arc-length error < 1 m over 1 hour |
 | `tests/test_trace_rays.py` | Integration tests: output shape (scalar and array sources), invalid-depth-shape error, NaN consistency, meridional symmetry, Snell's law slowdown across a submarine ridge, Snell's law refraction direction on a north-deepening gradient, multi-source output shape, multi-source results match individual single-source calls; dispersive tests: multiple-parameter error, shallow-water limit, deep-water limit, dispersive < shallow-water, period/frequency/wavelength consistency, output shape unchanged |
+| `tests/test_refraction.py` | Snapshot regression tests locking ray refraction against `refraction_snapshots.npz`: non-dispersive and legacy-group rays reproduced to roundoff, exact NaN-mask (ray termination) check, and the phase-vs-group slowness distinction |
 
 ## Examples
 
